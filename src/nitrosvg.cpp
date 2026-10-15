@@ -36,9 +36,10 @@ static std::string unprefix(const std::string &s) {
     return out;
 }
 
-// CSS custom properties with a fallback, "var(--vscode-editor-background, #1E1E1E)" (VS Code's
-// images): nothing defines the property in a standalone file, so a browser uses the fallback;
-// lunasvg doesn't know var() at all (black). Replaced by the fallback.
+// CSS custom properties, "var(--vscode-editor-background, #1E1E1E)" (VS Code's images): nothing
+// defines the property in a standalone file, so a browser uses the fallback, or without one the
+// inherited value (these files have fill="none" on the root: invisible); lunasvg doesn't know
+// var() at all (black squares). Replaced by the fallback, or by "inherit".
 static std::string var_fallbacks(const std::string &s) {
     std::string out;
     out.reserve(s.size());
@@ -53,9 +54,14 @@ static std::string var_fallbacks(const std::string &s) {
             else if (s[j] == ',' && depth == 1 && comma == std::string::npos) comma = j;
             else if (s[j] == '"' || s[j] == '<' || s[j] == ';') break;   // not a well-formed var()
         }
-        if (depth || comma == std::string::npos) {   // no fallback (or damaged): leave it
+        if (depth) {   // damaged: leave it
             out.append(s, v, 4);
             i = v + 4;
+            continue;
+        }
+        if (comma == std::string::npos) {   // no fallback: the inherited value
+            out += "inherit";
+            i = j;
             continue;
         }
         size_t a = comma + 1, b = j - 1;   // fallback: (comma, closing parenthesis)

@@ -149,7 +149,8 @@ been still for ~80 ms (typically 5–40 ms); until then the previous rendering i
 stays smooth and the picture sharpens when it stops. Supported: shapes, paths, gradients, clipping,
 masks, patterns, `<style>` style sheets, text (with the system fonts), embedded images; before
 parsing, nitrosvg also fixes three things lunasvg would get wrong: `svg:`-prefixed elements
-(LibreOffice), CSS `var(--x, fallback)` colours (VS Code's images) and SVG 1.1 line breaks in text
+(LibreOffice), CSS `var(--x, fallback)` colours (VS Code's images: the fallback, or without one the inherited
+value; black squares otherwise) and SVG 1.1 line breaks in text
 (old exporters split words over lines). `patches/lunasvg.patch` (applied by `scripts/get-deps.sh`)
 fixes lunasvg itself: a repeated closepath (`ZZ`) lost the rest of the path, and masks zoomed in
 far allocated layers the size of the whole element (a crash). Not

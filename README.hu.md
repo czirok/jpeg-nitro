@@ -102,7 +102,8 @@ nem változik (jellemzően 5–40 ms alatt); addig az előző rajzolat nagyul, �
 folyamatos marad, és a kép a megállás után élesedik ki. Amit ismer: alakzatok, útvonalak,
 színátmenetek, vágás, maszk, minta, `<style>` stíluslap, szöveg (a rendszer betűtípusaival),
 beágyazott képek; a nitrosvg betöltés előtt három dolgot javít, amit a lunasvg rosszul kezelne:
-a `svg:` előtagos elemeket (LibreOffice), a CSS `var(--x, tartalék)` színeket (a VS Code képei) és
+a `svg:` előtagos elemeket (LibreOffice), a CSS `var(--x, tartalék)` színeket (a VS Code képei: a tartalékszín, ha nincs, az örökölt érték;
+különben fekete négyzetek) és
 az SVG 1.1 szerinti sortöréseket a szövegben (régi exportálók sorokra tördelik a szavakat). A
 `patches/lunasvg.patch` (a `scripts/get-deps.sh` alkalmazza) magát a lunasvg-t javítja: az ismételt
 lezárás (`ZZ`) után az útvonal többi része elveszett, nagy nagyításnál pedig a maszkok az egész elem
