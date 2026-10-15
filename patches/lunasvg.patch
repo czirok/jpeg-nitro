@@ -7,7 +7,9 @@ lunasvg / plutovg fixes for nitroview (scripts/get-deps.sh applies this after do
 - plutovg_surface_create cleared height * stride bytes computed in int (overflow above 2 GB;
   https://github.com/sammycage/plutovg/pull/91 refuses such surfaces instead)
 - stb_truetype read past the outline of a glyph whose last contour is a single off-curve
-  point (macOS Times "C"; ASan: heap-buffer-overflow in stbtt_GetGlyphShape)
+  point (macOS Times "C"; ASan: heap-buffer-overflow in stbtt_GetGlyphShape;
+  https://github.com/nothings/stb/issues/1296)
+- XML comments inside <text> were drawn as text (https://github.com/sammycage/lunasvg/pull/281)
 
 --- a/plutovg/source/plutovg-path.c
 +++ b/plutovg/source/plutovg-path.c
@@ -66,3 +68,13 @@ lunasvg / plutovg fixes for nitroview (scripts/get-deps.sh applies this after do
      maskImage->clipRect(maskRect(state.element()), FillRule::NonZero, state.currentTransform());
  
      auto currentTransform = state.currentTransform();
+--- a/source/svgparser.cpp
++++ b/source/svgparser.cpp
+@@ -777,7 +777,6 @@
+                 auto n = input.find("-->");
+                 if(n == std::string_view::npos)
+                     return false;
+-                handleText(input.substr(0, n), false);
+                 input.remove_prefix(n + 3);
+                 continue;
+             }
