@@ -3,7 +3,11 @@ lunasvg / plutovg fixes for nitroview (scripts/get-deps.sh applies this after do
   the path (https://github.com/sammycage/plutovg/pull/90)
 - mask and clip-path layers were as large as the whole element on the target (not clipped to
   it like group layers): zoomed in far, huge allocations, then a crash
-- plutovg_surface_create cleared height * stride bytes computed in int (overflow above 2 GB)
+  (https://github.com/sammycage/lunasvg/pull/284)
+- plutovg_surface_create cleared height * stride bytes computed in int (overflow above 2 GB;
+  https://github.com/sammycage/plutovg/pull/91 refuses such surfaces instead)
+- stb_truetype read past the outline of a glyph whose last contour is a single off-curve
+  point (macOS Times "C"; ASan: heap-buffer-overflow in stbtt_GetGlyphShape)
 
 --- a/plutovg/source/plutovg-path.c
 +++ b/plutovg/source/plutovg-path.c
@@ -19,6 +23,18 @@ lunasvg / plutovg fixes for nitroview (scripts/get-deps.sh applies this after do
              current_x = start_x;
              current_y = start_y;
          } else {
+--- a/plutovg/source/plutovg-stb-truetype.h
++++ b/plutovg/source/plutovg-stb-truetype.h
+@@ -1768,7 +1768,8 @@
+                num_vertices = stbtt__close_shape(vertices, num_vertices, was_off, start_off, sx,sy,scx,scy,cx,cy);
+ 
+             // now start the new one
+-            start_off = !(flags & 1);
++            // (a contour of a single off-curve point has no next point: start on that point)
++            start_off = !(flags & 1) && i < ttUSHORT(endPtsOfContours+j*2);
+             if (start_off) {
+                // if we start off with an off-curve point, then when we need to find a point on the curve
+                // where we can start, and we need to save some state for when we wraparound.
 --- a/plutovg/source/plutovg-surface.c
 +++ b/plutovg/source/plutovg-surface.c
 @@ -30,7 +30,7 @@
