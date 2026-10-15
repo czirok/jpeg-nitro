@@ -31,6 +31,7 @@
                 <string>org.webmproject.webp</string>
                 <string>com.compuserve.gif</string>
                 <string>com.microsoft.bmp</string>
+                <string>public.svg-image</string>
             </array>
         </dict>
         <dict>

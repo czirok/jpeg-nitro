@@ -141,6 +141,21 @@ Apple ImageIO like the other formats. Transparent images are shown over black. O
 (screenshots, scans, AI images, upscaled textures, Photoshop exports) nitropng averages
 **~43 ms/image** vs ~171 ms for Wuffs and ~318 ms for ImageIO; see [nitropng](#nitropng).
 
+**SVG** (macOS, when `scripts/get-deps.sh` has fetched [lunasvg](https://github.com/sammycage/lunasvg)):
+rendered by lunasvg over white, first in full with the long side 1024–4096 pixels (small icons are
+enlarged, huge drawings reduced), so paging, fitting and zooming out work as for photos. Zoomed in
+beyond that, the visible part is rendered again at screen resolution once the zoom or position has
+been still for ~80 ms (typically 5–40 ms); until then the previous rendering is scaled, so pinching
+stays smooth and the picture sharpens when it stops. Supported: shapes, paths, gradients, clipping,
+masks, patterns, `<style>` style sheets, text (with the system fonts), embedded images; before
+parsing, nitrosvg also fixes three things lunasvg would get wrong: `svg:`-prefixed elements
+(LibreOffice), CSS `var(--x, fallback)` colours (VS Code's images) and SVG 1.1 line breaks in text
+(old exporters split words over lines). Not
+supported: filters (drop shadows and blurs are left out), HTML labels in `<foreignObject>` (draw.io
+diagrams), SVG fonts and symbol-only sprite files, which draw nothing. Of 883 SVGs collected from a
+Mac (icons, logos, diagrams, Illustrator exports) 867 open; the 16 others draw nothing in a browser
+either.
+
 **Colour management:** embedded ICC profiles are honoured for every format (e.g. Display P3
 from iPhones and Mac screenshots, Adobe RGB scans); images without a profile are treated as
 sRGB. The decoded pixel values are left as they are and the display layer is tagged with the
@@ -490,7 +505,8 @@ Requirements on macOS: Xcode Command Line Tools.
 make                 # nitroview; uses libjpeg-turbo as fallback if it is in third_party/
 make TURBOJPEG=0     # no libjpeg-turbo: other JPEGs go to Apple ImageIO
 make WUFFS=0         # no Wuffs: PNG via Apple ImageIO (~1.6x slower)
-scripts/get-deps.sh  # download + build libjpeg-turbo (macOS: Intel + ARM), stb_image, Wuffs into third_party/ (~30 s)
+make SVG=0           # no SVG (lunasvg)
+scripts/get-deps.sh  # download + build libjpeg-turbo (macOS: Intel + ARM), stb_image, Wuffs, lunasvg into third_party/ (~30 s)
 make app             # nitroview.app for the Finder: universal (Intel + Apple Silicon), macOS 12+,
                      # ad-hoc signed, icon from packaging/icon.png
 make zip / make dmg  # nitroview.zip / nitroview.dmg (drag to Applications) for passing it on
@@ -629,6 +645,8 @@ that depend on each other ~80%, so decoding scans / components in parallel would
 
 MIT, see [LICENSE](LICENSE). The optional dependencies downloaded by `scripts/get-deps.sh`
 have their own licenses: libjpeg-turbo (BSD-style / IJG / zlib), Wuffs (Apache-2.0),
-stb_image (public domain / MIT). The inverse DCT implements the algorithm of jidctint.c from the
+stb_image (public domain / MIT), lunasvg and plutovg (MIT; plutovg's rasterizer is FreeType's
+smooth rasterizer, FreeType License: portions of this software are copyright © 2014 The FreeType
+Project (www.freetype.org), all rights reserved). The inverse DCT implements the algorithm of jidctint.c from the
 Independent JPEG Group's libjpeg: this software is based in part on the work of the
 Independent JPEG Group.

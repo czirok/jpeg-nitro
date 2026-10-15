@@ -4,6 +4,7 @@
 #     reference for the tests and benchmarks (macOS: x86_64 + arm64 in one library)
 #   - nasm (needed to build libjpeg-turbo's SIMD code) and cmake (via pip), locally
 #   - stb_image.h and wuffs (only for the decoder comparison in bench/bench)
+#   - lunasvg (MIT, with its plutovg): SVG rendering in nitroview
 # Nothing is installed system-wide.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -11,6 +12,7 @@ mkdir -p third_party && cd third_party
 TP=$PWD
 LJT_VER=3.1.2
 NASM_VER=2.16.03
+LUNASVG_COMMIT=cf3594d5232e075fb344365191f0ecadd1519e1e   # 2026-09-17
 JOBS=$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 8)
 
 if [ ! -f stb_image.h ]; then
@@ -18,6 +20,14 @@ if [ ! -f stb_image.h ]; then
 fi
 if [ ! -f wuffs.c ]; then
   curl -fsSL -o wuffs.c https://raw.githubusercontent.com/google/wuffs/main/release/c/wuffs-unsupported-snapshot.c
+fi
+
+if [ ! -f lunasvg/.commit-$LUNASVG_COMMIT ]; then
+  rm -rf lunasvg lunasvg-$LUNASVG_COMMIT
+  curl -fsSL -o lunasvg.tar.gz https://github.com/sammycage/lunasvg/archive/$LUNASVG_COMMIT.tar.gz
+  tar xf lunasvg.tar.gz && rm lunasvg.tar.gz
+  mv lunasvg-$LUNASVG_COMMIT lunasvg
+  touch lunasvg/.commit-$LUNASVG_COMMIT
 fi
 
 if [ ! -x tools/nasm/bin/nasm ]; then
@@ -68,4 +78,4 @@ if [ "$(uname -s)" = Darwin ]; then
 elif [ ! -f ljt/lib/libturbojpeg.a ]; then
   build_ljt "$(uname -m)" ljt
 fi
-echo "dependencies ready in third_party/ (libjpeg-turbo $LJT_VER, stb_image, wuffs)"
+echo "dependencies ready in third_party/ (libjpeg-turbo $LJT_VER, stb_image, wuffs, lunasvg)"

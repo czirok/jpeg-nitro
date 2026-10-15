@@ -34,6 +34,9 @@
 #ifdef NV_WUFFS
 #include "png_wuffs.h"   // optional fast PNG decoder
 #endif
+#ifdef NV_SVG
+#include "nitrosvg.h"    // optional SVG rendering (lunasvg)
+#endif
 #import <ImageIO/ImageIO.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
@@ -71,11 +74,16 @@ typedef enum { KIND_YUV = 0, KIND_BGRA = 1, KIND_PNG = 2, KIND_PLANAR = 3 } Kind
 @property(nonatomic) double read_ms, decode_ms;
 @property(nonatomic) int mode, bands;
 @property(nonatomic) id<MTLTexture> texture; // converted RGBA + mips (main thread only)
+@property(nonatomic) void *svg;              // SVG: the document (nitrosvg), for sharp zoomed-in views
+@property(nonatomic) double svgScale;        // SVG: decoded pixels per SVG unit
 @end
 @implementation Decoded {
     int _pw[3], _ph[3];
     size_t _offset[3], _pitch[3];
 }
+#ifdef NV_SVG
+- (void)dealloc { if (_svg) nitrosvg_free(_svg); }
+#endif
 - (int *)pw { return _pw; }
 - (int *)ph { return _ph; }
 - (size_t *)offset { return _offset; }
@@ -217,7 +225,7 @@ done:
 }
 
 // Decode one file into a Metal buffer. Runs on the decoder thread.
-enum { MODE_TURBOJPEG = -1, MODE_WUFFS = -2, MODE_IMAGEIO = -3, MODE_NITROPNG = -4, MODE_NITROPSD = -5 };
+enum { MODE_TURBOJPEG = -1, MODE_WUFFS = -2, MODE_IMAGEIO = -3, MODE_NITROPNG = -4, MODE_NITROPSD = -5, MODE_SVG = -6 };
 static int g_nthreads = 0;   // -j
 
 static const char *mode_name(int m) {
@@ -230,6 +238,7 @@ static const char *mode_name(int m) {
     case MODE_IMAGEIO: return "imageio";
     case MODE_NITROPNG: return "nitropng";
     case MODE_NITROPSD: return "nitropsd";
+    case MODE_SVG: return "svg";
     default: return "?";
     }
 }
@@ -350,6 +359,32 @@ static Decoded *decode_imageio(NSData *data, Decoded *d, BufferPool *pool, size_
     return d;
 }
 
+#ifdef NV_SVG
+// SVG: rendered once in full here (the long side 1024..4096 pixels: small icons are
+// enlarged, huge drawings reduced), over white. Zoomed in further, the viewer renders
+// the visible part again at screen resolution (see ViewerView svgDetail).
+static Decoded *decode_svg(NSData *data, Decoded *d, BufferPool *pool, size_t align, double t1) {
+    nitrosvg *svg = nitrosvg_load(data.bytes, data.length);
+    if (!svg) return nil;
+    double w, h;
+    nitrosvg_size(svg, &w, &h);
+    double l = MAX(w, h), k = l < 1024 ? 1024 / l : l > 4096 ? 4096 / l : 1;
+    int iw = MAX(1, MIN(MAX_TEX, (int)lround(w * k))), ih = MAX(1, MIN(MAX_TEX, (int)lround(h * k)));
+    id<MTLBuffer> buf = bgra_buffer(d, iw, ih, pool, align);
+    if (!buf || nitrosvg_render(svg, buf.contents, iw, ih, d.pitch[0], k, 0, 0)) {
+        if (buf) [pool put:buf];
+        nitrosvg_free(svg);
+        return nil;
+    }
+    d.svg = svg;
+    d.svgScale = k;
+    d.colorSpace = srgb_space();
+    d.orientation = 1;
+    bgra_done(d, buf, MODE_SVG, t1);
+    return d;
+}
+#endif
+
 #ifdef NV_TURBOJPEG
 static Decoded *decode_turbojpeg(const uint8_t *bytes, size_t len, Decoded *d, BufferPool *pool, size_t align, double t1) {
     tjhandle h = tj3Init(TJINIT_DECOMPRESS);
@@ -391,6 +426,9 @@ static Decoded *decode_file(NSString *path, BufferPool *pool, size_t align) {
     d.read_ms = t1 - t0;
     const uint8_t *bytes = data.bytes;
     size_t len = data.length;
+#ifdef NV_SVG
+    if ([ext isEqualToString:@"svg"]) return decode_svg(data, d, pool, align, t1);
+#endif
     d.colorSpace = image_colorspace(data);   // tags the display layer (ICC profile or sRGB)
     if (is_png(bytes, len)) {
         // nitropng (parallel): 8-bit gray / gray+alpha / RGB / RGBA, non-interlaced
@@ -864,6 +902,16 @@ static NSArray<NSString *> *dropped_paths(id<NSDraggingInfo> info);
     BOOL _userSized;          // the user resized the window: stop following the image size
     BOOL _selfResizing;       // our own setFrame in progress
     BOOL _fsTransition;       // entering / leaving full screen
+#ifdef NV_SVG
+    // SVG zoomed in beyond its decoded size: the visible part rendered at screen resolution
+    id<MTLTexture> _detailTex;
+    Decoded *_detailFor;
+    double _detailScale, _detailRect[4];   // the scale it was rendered for, its image rect (x y w h)
+    Decoded *_wantFor;                      // the last requested detail (pending or rendering)
+    double _wantScale, _wantRect[4];
+    unsigned _detailReq;
+    dispatch_queue_t _svgQueue;
+#endif
 }
 - (BOOL)acceptsFirstResponder { return YES; }
 
@@ -1278,17 +1326,26 @@ static int debug_zoom(void) {   // NV_DEBUG_ZOOM=1: log wheel / pinch events and
     if (d) [self zoomBy:1 + e.magnification image:d view:self.drawableSize anchor:[self anchorForEvent:e] continuous:YES];
 }
 
-// Where to draw the image: NDC corner + extent (top-left snapped to device pixels).
-- (DrawParams)drawParams:(Decoded *)d view:(CGSize)ds {
+// Where the image is: scale and the device pixel of its top-left corner (snapped).
+- (double)placement:(Decoded *)d view:(CGSize)ds x0:(double *)x0 y0:(double *)y0 {
     double iw, ih;
     display_size(d, &iw, &ih);
     double s = [self currentScale:d view:ds];
     if (_zoomed) [self clampCenter:d scale:s view:ds];
     double cx = _zoomed ? _cx : iw / 2, cy = _zoomed ? _cy : ih / 2;
-    double x0 = round(ds.width / 2 - cx * s), y0 = round(ds.height / 2 - cy * s);
+    *x0 = round(ds.width / 2 - cx * s);
+    *y0 = round(ds.height / 2 - cy * s);
+    return s;
+}
+
+// Where to draw the image: NDC corner + extent (top-left snapped to device pixels).
+- (DrawParams)drawParams:(Decoded *)d view:(CGSize)ds {
+    double iw, ih, x0, y0;
+    display_size(d, &iw, &ih);
+    double s = [self placement:d view:ds x0:&x0 y0:&y0];
     DrawParams p = {{(float)(x0 / ds.width * 2 - 1), (float)(1 - y0 / ds.height * 2)},
                     {(float)(2 * iw * s / ds.width), (float)(2 * ih * s / ds.height)},
-                    (uint32_t)d.orientation, (uint32_t)(s >= 2 && s == floor(s))};
+                    (uint32_t)d.orientation, (uint32_t)(s >= 2 && s == floor(s) && !d.svg)};
     return p;
 }
 
@@ -1368,6 +1425,98 @@ static int debug_zoom(void) {   // NV_DEBUG_ZOOM=1: log wheel / pinch events and
     [self updateTitle];   // fit percentage changes with the window size
 }
 
+#ifdef NV_SVG
+// SVG zoomed in beyond its decoded size (more than one device pixel per decoded pixel):
+// once the zoom / position has been still for a moment, the visible part (+ a margin
+// for panning) is rendered again at screen resolution on a background queue and
+// drawn over the decoded image. Until then the previous detail is drawn where it
+// belongs (scaled), so zooming stays smooth and only sharpens when it stops.
+- (void)svgDetail:(Decoded *)d encoder:(id<MTLRenderCommandEncoder>)re view:(CGSize)ds {
+    if (_detailFor != d) { _detailTex = nil; _detailFor = nil; }
+    double iw, ih, x0, y0;
+    display_size(d, &iw, &ih);
+    double s = [self placement:d view:ds x0:&x0 y0:&y0];
+    if (s <= 1.001) {   // the decoded image is sharp enough
+        _detailTex = nil;
+        _detailFor = nil;
+        _wantFor = nil;
+        return;
+    }
+    // visible part in device pixels, integer, within the image
+    double m = round(MAX(ds.width, ds.height) / 8);
+    double l = MAX(floor(-m), x0), t = MAX(floor(-m), y0);
+    double r = MIN(ceil(ds.width + m), x0 + ceil(iw * s)), b = MIN(ceil(ds.height + m), y0 + ceil(ih * s));
+    double vl = MAX(0, x0), vt = MAX(0, y0), vr = MIN(ds.width, x0 + iw * s), vb = MIN(ds.height, y0 + ih * s);
+    if (_detailTex) {
+        double *q = _detailRect;
+        DrawParams p = {{(float)((x0 + q[0] * s) / ds.width * 2 - 1), (float)(1 - (y0 + q[1] * s) / ds.height * 2)},
+                        {(float)(2 * q[2] * s / ds.width), (float)(2 * q[3] * s / ds.height)}, 1, 0};
+        [re setVertexBytes:&p length:sizeof p atIndex:0];
+        [re setFragmentBytes:&p length:sizeof p atIndex:0];
+        [re setFragmentTexture:_detailTex atIndex:0];
+        [re drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4];
+        // still right: same scale and it covers the view
+        if (fabs(_detailScale - s) <= 1e-9 * s && x0 + q[0] * s <= vl + 0.5 && y0 + q[1] * s <= vt + 0.5 &&
+            x0 + (q[0] + q[2]) * s >= vr - 0.5 && y0 + (q[1] + q[3]) * s >= vb - 0.5)
+            return;
+    }
+    if (r <= l || b <= t) return;
+    double want[4] = {(l - x0) / s, (t - y0) / s, (r - l) / s, (b - t) / s};
+    if (_wantFor == d && _wantScale == s && !memcmp(want, _wantRect, sizeof want)) return;   // already on its way
+    _wantFor = d;
+    _wantScale = s;
+    memcpy(_wantRect, want, sizeof want);
+    unsigned req = ++_detailReq;
+    CGRect wr = CGRectMake(want[0], want[1], want[2], want[3]);
+    int w = MIN(MAX_TEX, (int)(r - l)), h = MIN(MAX_TEX, (int)(b - t));
+    if (!_svgQueue) _svgQueue = dispatch_queue_create("nitroview.svg", DISPATCH_QUEUE_SERIAL);
+    __weak ViewerView *ws = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 80 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
+        ViewerView *v = ws;
+        if (!v || req != v->_detailReq) return;   // moved on meanwhile: a newer request follows
+        double k = d.svgScale;
+        dispatch_async(v->_svgQueue, ^{
+            size_t pitch = (size_t)w * 4;
+            uint8_t *px = malloc(pitch * h);
+            double t0 = now_ms();
+            int rc = px ? nitrosvg_render(d.svg, px, w, h, pitch, k * s, wr.origin.x / k, wr.origin.y / k) : -1;
+            double ms = now_ms() - t0;
+            dispatch_async(dispatch_get_main_queue(), ^{
+                ViewerView *v2 = ws;
+                if (v2 && !rc) [v2 svgDetailDone:d pixels:px w:w h:h scale:s rect:wr ms:ms];
+                free(px);
+            });
+        });
+    });
+}
+
+- (void)svgDetailDone:(Decoded *)d pixels:(const uint8_t *)px w:(int)w h:(int)h scale:(double)s
+                 rect:(CGRect)rect ms:(double)ms {
+    if (d != [_loader get:_index]) return;   // paged away
+    MTLTextureDescriptor *td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
+                                                                                  width:w height:h mipmapped:YES];
+    td.storageMode = MTLStorageModeManaged;
+    td.usage = MTLTextureUsageShaderRead;
+    id<MTLTexture> t = [_gpu.device newTextureWithDescriptor:td];
+    if (!t) return;
+    [t replaceRegion:MTLRegionMake2D(0, 0, w, h) mipmapLevel:0 withBytes:px bytesPerRow:(NSUInteger)w * 4];
+    id<MTLCommandBuffer> cb = [_gpu.queue commandBuffer];
+    id<MTLBlitCommandEncoder> be = [cb blitCommandEncoder];
+    [be generateMipmapsForTexture:t];   // drawn smaller while zooming out, until the next one
+    [be endEncoding];
+    [cb commit];
+    _detailTex = t;
+    _detailFor = d;
+    _detailScale = s;
+    _detailRect[0] = rect.origin.x;
+    _detailRect[1] = rect.origin.y;
+    _detailRect[2] = rect.size.width;
+    _detailRect[3] = rect.size.height;
+    if (getenv("NV_DEBUG_SVG")) fprintf(stderr, "svg detail %dx%d at %.0f%%: %.1f ms\n", w, h, 100 * s, ms);
+    self.needsDisplay = YES;
+}
+#endif
+
 - (void)drawInMTKView:(MTKView *)view {
     MTLRenderPassDescriptor *rpd = view.currentRenderPassDescriptor;
     if (!rpd) return;
@@ -1392,6 +1541,9 @@ static int debug_zoom(void) {   // NV_DEBUG_ZOOM=1: log wheel / pinch events and
         [re setFragmentBytes:&p length:sizeof p atIndex:0];
         [re setFragmentTexture:tex atIndex:0];
         [re drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4];
+#ifdef NV_SVG
+        if (d.svg) [self svgDetail:d encoder:re view:view.drawableSize];
+#endif
     }
     [re endEncoding];
     if (tex && !_reported) {
@@ -1513,7 +1665,11 @@ static NSArray<NSString *> *collect_files(NSArray<NSString *> *args) {
             NSString *ext = f.pathExtension.lowercaseString;
             static NSSet *exts;
             if (!exts) exts = [NSSet setWithArray:@[@"jpg", @"jpeg", @"jpe", @"png", @"heic", @"heif", @"tif", @"tiff",
-                                                    @"webp", @"gif", @"bmp", @"psd", @"psb"]];
+                                                    @"webp", @"gif", @"bmp", @"psd", @"psb",
+#ifdef NV_SVG
+                                                    @"svg",
+#endif
+                                                    ]];
             if ([exts containsObject:ext])
                 [out addObject:[a stringByAppendingPathComponent:f]];
         }

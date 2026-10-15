@@ -4,6 +4,7 @@
 #                        in third_party/ljt (see scripts/get-deps.sh), standalone otherwise
 #   make TURBOJPEG=0     no libjpeg-turbo: JPEGs nitrojpeg can't decode go to Apple ImageIO
 #   make WUFFS=0         no Wuffs: PNG is decoded by Apple ImageIO (~1.8x slower)
+#   make SVG=0           no SVG support (lunasvg, from scripts/get-deps.sh)
 #   make app             nitroview.app bundle, so the Finder can open images with it: universal
 #                        (x86_64 + arm64, macOS 12+); MAC_ARCHS=x86_64 for one architecture only
 #   make zip / make dmg  nitroview.zip / nitroview.dmg (drag to Applications) of the app
@@ -86,6 +87,10 @@ FLATPAK_REPO     := build/flatpak-repo
 FLATPAK_BUNDLE   := nitroview-gnome.flatpak
 
 WUFFS      ?= $(if $(wildcard third_party/wuffs.c),1,0)
+LUNA       := third_party/lunasvg
+SVG        ?= $(if $(wildcard $(LUNA)/include/lunasvg.h),1,0)
+CXX        := clang++
+JOBS       := $(shell sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 8)
 
 ifeq ($(TURBOJPEG),1)
 VIEWER_DEFS += -DNV_TURBOJPEG -I$(LJT)/include
@@ -94,6 +99,11 @@ endif
 ifeq ($(WUFFS),1)
 VIEWER_DEFS += -DNV_WUFFS
 VIEWER_OBJS += build/png_wuffs.o
+endif
+ifeq ($(SVG),1)
+VIEWER_DEFS += -DNV_SVG
+VIEWER_OBJS += build/libnitrosvg.a
+VIEWER_LIBS += -lc++
 endif
 
 REF_CFLAGS := $(CFLAGS) -DNJ_REFERENCE -I$(LJT)/include
@@ -198,8 +208,25 @@ build/png_wuffs.o: src/png_wuffs.c src/png_wuffs.h
 	@mkdir -p build
 	$(CC) -O3 $(CPUFLAGS) -w -c $< -o $@
 
+# optional SVG rendering: lunasvg + plutovg (third_party/lunasvg, MIT) + src/nitrosvg.cpp,
+# one static library, compiled once (in parallel); $(1): compiler flags (architecture, CPU)
+SVG_C    = $(wildcard $(LUNA)/plutovg/source/*.c)
+SVG_CXX  = $(wildcard $(LUNA)/source/*.cpp) src/nitrosvg.cpp
+SVG_DEFS := -DLUNASVG_BUILD -DLUNASVG_BUILD_STATIC -DPLUTOVG_BUILD -DPLUTOVG_BUILD_STATIC \
+            -DLUNASVG_DISABLE_EXTERNAL_RESOURCES -I$(LUNA)/include -I$(LUNA)/source -I$(LUNA)/plutovg/include \
+            -I$(LUNA)/plutovg/source
+define svg_lib
+	@rm -rf $(@D)/svgobj && mkdir -p $(@D)/svgobj
+	@echo "compiling lunasvg + plutovg into $@"
+	@printf '%s\n' $(SVG_C) | xargs -n1 -P$(JOBS) sh -c '$(CC) $(1) -O3 -w $(SVG_DEFS) -c "$$0" -o $(@D)/svgobj/$$(basename "$$0").o'
+	@printf '%s\n' $(SVG_CXX) | xargs -n1 -P$(JOBS) sh -c '$(CXX) -std=c++17 -fno-exceptions -fno-rtti $(1) -O3 -w $(SVG_DEFS) -c "$$0" -o $(@D)/svgobj/$$(basename "$$0").o'
+	@rm -f $@ && ar rcs $@ $(@D)/svgobj/*.o
+endef
+build/libnitrosvg.a: src/nitrosvg.cpp src/nitrosvg.h
+	$(call svg_lib,$(CPUFLAGS))
+
 # rebuild the viewer when the optional parts change
-CONFIG := tj$(TURBOJPEG)-wuffs$(WUFFS)
+CONFIG := tj$(TURBOJPEG)-wuffs$(WUFFS)-svg$(SVG)
 build/.config-$(CONFIG):
 	@mkdir -p build
 	@rm -f build/.config-* nitroview
@@ -213,7 +240,7 @@ build/shaders.inc: src/shaders.metal
 nitroview: src/nitroview.m build/shaders.inc build/nitrojpeg.o build/nitropng.o build/nitropsd.o $(VIEWER_OBJS) build/.config-$(CONFIG) Makefile
 	$(CC) $(CFLAGS) $(VIEWER_DEFS) -Ibuild -fobjc-arc src/nitroview.m build/nitrojpeg.o build/nitropng.o build/nitropsd.o $(VIEWER_OBJS) $(VIEWER_LIBS) \
 	  $(FRAMEWORKS) -framework ImageIO -o $@
-	@echo "built nitroview (libjpeg-turbo fallback: $(if $(filter 1,$(TURBOJPEG)),yes,no), Wuffs PNG: $(if $(filter 1,$(WUFFS)),yes,no), ImageIO: always)"
+	@echo "built nitroview (libjpeg-turbo fallback: $(if $(filter 1,$(TURBOJPEG)),yes,no), Wuffs PNG: $(if $(filter 1,$(WUFFS)),yes,no), SVG: $(if $(filter 1,$(SVG)),yes,no), ImageIO: always)"
 
 # Dock / Finder icon: every iconset size scaled from packaging/icon.png
 build/nitroview.icns: packaging/icon.png
@@ -237,12 +264,14 @@ ljt_has = $(filter $(1),$(shell lipo -archs $(LJT)/lib/libturbojpeg.a 2>/dev/nul
 build/app-%/png_wuffs.o: src/png_wuffs.c src/png_wuffs.h
 	@mkdir -p $(@D)
 	$(CC) -arch $* $(MAC_MIN) -O3 $(APPCPU_$*) -w -c $< -o $@
+build/app-%/libnitrosvg.a: src/nitrosvg.cpp src/nitrosvg.h
+	$(call svg_lib,-arch $* $(MAC_MIN) $(APPCPU_$*))
 build/app-%/nitroview: src/nitroview.m build/shaders.inc $(DEC_SRC) $(DEC_HDR) $(if $(filter 1,$(WUFFS)),build/app-%/png_wuffs.o) \
-                       build/.config-$(CONFIG) Makefile
+                       $(if $(filter 1,$(SVG)),build/app-%/libnitrosvg.a) build/.config-$(CONFIG) Makefile
 	@mkdir -p $(@D)
 	$(CC) -arch $* $(MAC_MIN) -O3 $(APPCPU_$*) -Wall -Wextra -Wno-unused-parameter -Ibuild \
-	  $(if $(call ljt_has,$*),-DNV_TURBOJPEG -I$(LJT)/include) $(if $(filter 1,$(WUFFS)),-DNV_WUFFS) \
-	  -fobjc-arc src/nitroview.m $(DEC_SRC) $(if $(filter 1,$(WUFFS)),$(@D)/png_wuffs.o) \
+	  $(if $(call ljt_has,$*),-DNV_TURBOJPEG -I$(LJT)/include) $(if $(filter 1,$(WUFFS)),-DNV_WUFFS) $(if $(filter 1,$(SVG)),-DNV_SVG) \
+	  -fobjc-arc src/nitroview.m $(DEC_SRC) $(if $(filter 1,$(WUFFS)),$(@D)/png_wuffs.o) $(if $(filter 1,$(SVG)),$(@D)/libnitrosvg.a -lc++) \
 	  $(if $(call ljt_has,$*),$(LJT)/lib/libturbojpeg.a -Wl$(COMMA)-w) $(FRAMEWORKS) -framework ImageIO -o $@
 build/nitroview-universal: $(foreach a,$(MAC_ARCHS),build/app-$(a)/nitroview)
 	lipo -create $^ -output $@

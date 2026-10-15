@@ -93,6 +93,21 @@ Az átlátszó képek fekete háttéren jelennek meg. 38 valódi PNG-n (képerny
 AI-képek, felskálázott textúrák, Photoshop-exportok) a nitropng átlag **~43 ms/kép**, a Wuffs
 ~171, az ImageIO ~318 ms (lásd lent: „nitropng”).
 
+**SVG** (macOS-en, ha a `scripts/get-deps.sh` letöltötte a [lunasvg](https://github.com/sammycage/lunasvg)-t):
+a lunasvg rajzolja fehér háttérre, először egészben, a hosszabbik oldalt 1024–4096 pixelre
+igazítva (a kis ikonok nagyobbak lesznek, a hatalmas rajzok kisebbek), így a lapozás, az
+ablakhoz igazítás és a kicsinyítés ugyanúgy megy, mint a fotóknál. Ennél jobban felnagyítva a
+látható részt képernyő-felbontásban újra kirajzolja, amikor a nagyítás vagy a pozíció ~80 ms-ig
+nem változik (jellemzően 5–40 ms alatt); addig az előző rajzolat nagyul, így a csippentés
+folyamatos marad, és a kép a megállás után élesedik ki. Amit ismer: alakzatok, útvonalak,
+színátmenetek, vágás, maszk, minta, `<style>` stíluslap, szöveg (a rendszer betűtípusaival),
+beágyazott képek; a nitrosvg betöltés előtt három dolgot javít, amit a lunasvg rosszul kezelne:
+a `svg:` előtagos elemeket (LibreOffice), a CSS `var(--x, tartalék)` színeket (a VS Code képei) és
+az SVG 1.1 szerinti sortöréseket a szövegben (régi exportálók sorokra tördelik a szavakat). Amit nem: szűrők (az árnyék és az elmosás kimarad), HTML-feliratok
+`<foreignObject>`-ben (draw.io-ábrák), SVG-betűtípusok és a csak szimbólumokat tartalmazó
+sprite-fájlok, amelyek nem rajzolnak semmit. Egy Macről összegyűjtött 883 SVG-ből (ikonok, logók,
+ábrák, Illustrator-exportok) 867 nyílik meg; a többi 16 böngészőben sem rajzol semmit.
+
 **Színkezelés:** a beágyazott ICC-profilokat minden formátumnál figyelembe veszi (pl. Display P3 az
 iPhone-okról és a Mac-es képernyőképekből, Adobe RGB a szkennelésekből); a profil nélküli képeket
 sRGB-nek tekinti. A dekódolt képpontok változatlanok maradnak, a kirajzoló réteg kapja meg a kép
@@ -482,6 +497,7 @@ macOS-en előfeltétel: Xcode Command Line Tools.
 make                 # néző; ha megvan a libjpeg-turbo, tartalék dekódernek beépíti
 make TURBOJPEG=0     # libjpeg-turbo nélkül: a többi JPEG-et az Apple ImageIO dekódolja
 make WUFFS=0         # Wuffs nélkül: PNG az Apple ImageIO-val (~1.6× lassabb)
+make SVG=0           # SVG (lunasvg) nélkül
 make app             # nitroview.app a Finderhez: universal (Intel + Apple Silicon), macOS 12-től,
                      # ad-hoc aláírással, ikon: packaging/icon.png
 make zip / make dmg  # nitroview.zip / nitroview.dmg (Alkalmazások mappába húzható) továbbadáshoz
@@ -631,5 +647,7 @@ adják, így a menetek / komponensek párhuzamos dekódolása csak ~1.2–1.3×-
 
 MIT, lásd [LICENSE](LICENSE). A `scripts/get-deps.sh` által letöltött opcionális függőségeknek
 saját licencük van: libjpeg-turbo (BSD-szerű / IJG / zlib), Wuffs (Apache-2.0), stb_image
-(public domain / MIT). Az IDCT a Independent JPEG Group libjpeg-jének jidctint.c
+(public domain / MIT), lunasvg és plutovg (MIT; a plutovg raszterizálója a FreeType
+„smooth” raszterizálója, FreeType License: portions of this software are copyright © 2014 The
+FreeType Project (www.freetype.org), all rights reserved). Az IDCT a Independent JPEG Group libjpeg-jének jidctint.c
 algoritmusát valósítja meg: ez a szoftver részben az Independent JPEG Group munkáján alapul.
