@@ -99,10 +99,46 @@ static std::string text_newlines(const std::string &s) {
     return out;
 }
 
+// Repeated closepath in path data, "... ZZM ..." (valid: Z may follow Z) makes plutovg reject
+// the rest of the path (a logo lost most of its lettering): one Z of each run is kept.
+static bool repeated_z(const std::string &s) {
+    for (size_t i = s.find_first_of("Zz"); i != std::string::npos; i = s.find_first_of("Zz", i + 1)) {
+        size_t j = s.find_first_not_of(" \t\r\n,", i + 1);
+        if (j != std::string::npos && (s[j] == 'Z' || s[j] == 'z')) return true;
+    }
+    return false;
+}
+static std::string single_z(const std::string &s) {
+    std::string out;
+    out.reserve(s.size());
+    for (size_t i = 0; i < s.size(); i++) {
+        out += s[i];
+        // inside a d="..." / d='...' attribute
+        if ((s[i] == '"' || s[i] == '\'') && i >= 2 && s[i - 1] == '=' && s[i - 2] == 'd' &&
+            (i < 3 || isspace((unsigned char)s[i - 3]))) {
+            char q = s[i];
+            bool z = false;   // the last command was Z
+            for (i++; i < s.size() && s[i] != q; i++) {
+                char c = s[i];
+                if (c == 'Z' || c == 'z') {
+                    if (z) continue;
+                    z = true;
+                } else if (!isspace((unsigned char)c) && c != ',') {
+                    z = false;
+                }
+                out += c;
+            }
+            if (i < s.size()) out += s[i];
+        }
+    }
+    return out;
+}
+
 nitrosvg *nitrosvg_load(const void *data, size_t len) {
     std::string src(static_cast<const char *>(data), len);
     if (src.find("<svg:svg") != std::string::npos) src = unprefix(src);
     if (src.find("var(--") != std::string::npos) src = var_fallbacks(src);
+    if (repeated_z(src)) src = single_z(src);
     if (src.find("<text") != std::string::npos && src.find("xml:space=\"preserve\"") == std::string::npos)
         src = text_newlines(src);
     const char *s = src.data();
