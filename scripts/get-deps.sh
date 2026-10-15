@@ -12,7 +12,7 @@ mkdir -p third_party && cd third_party
 TP=$PWD
 LJT_VER=3.1.2
 NASM_VER=2.16.03
-LUNASVG_COMMIT=cf3594d5232e075fb344365191f0ecadd1519e1e   # 2026-09-17
+LUNASVG_COMMIT=90d6ff333862acf3f5551ffbbcb1e45957661881   # 2026-10-15
 JOBS=$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 8)
 
 if [ ! -f stb_image.h ]; then

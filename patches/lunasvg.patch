@@ -1,9 +1,6 @@
 lunasvg / plutovg fixes for nitroview (scripts/get-deps.sh applies this after downloading):
 - plutovg_path_parse rejected a repeated closepath ("ZZ", valid SVG) and dropped the rest of
   the path (https://github.com/sammycage/plutovg/pull/90)
-- mask and clip-path layers were as large as the whole element on the target (not clipped to
-  it like group layers): zoomed in far, huge allocations, then a crash
-  (https://github.com/sammycage/lunasvg/pull/284)
 - plutovg_surface_create cleared height * stride bytes computed in int (overflow above 2 GB;
   https://github.com/sammycage/plutovg/pull/91 refuses such surfaces instead)
 - stb_truetype read past the outline of a glyph whose last contour is a single off-curve
@@ -48,26 +45,6 @@ lunasvg / plutovg fixes for nitroview (scripts/get-deps.sh applies this after do
      return surface;
  }
  
---- a/source/svgelement.cpp
-+++ b/source/svgelement.cpp
-@@ -1056,7 +1056,7 @@
- {
-     if(state.hasCycleReference(this))
-         return;
--    auto maskImage = Canvas::create(state.currentTransform().mapRect(state.paintBoundingBox()));
-+    auto maskImage = Canvas::create(state.currentTransform().mapRect(state.paintBoundingBox()).intersected(state.canvas()->extents()));
-     auto currentTransform = state.currentTransform() * localTransform();
-     if(m_clipPathUnits.value() == Units::ObjectBoundingBox) {
-         auto bbox = state.fillBoundingBox();
-@@ -1197,7 +1197,7 @@
- {
-     if(state.hasCycleReference(this))
-         return;
--    auto maskImage = Canvas::create(state.currentTransform().mapRect(state.paintBoundingBox()));
-+    auto maskImage = Canvas::create(state.currentTransform().mapRect(state.paintBoundingBox()).intersected(state.canvas()->extents()));
-     maskImage->clipRect(maskRect(state.element()), FillRule::NonZero, state.currentTransform());
- 
-     auto currentTransform = state.currentTransform();
 --- a/source/svgparser.cpp
 +++ b/source/svgparser.cpp
 @@ -777,7 +777,6 @@
