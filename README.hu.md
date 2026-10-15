@@ -101,10 +101,12 @@ látható részt képernyő-felbontásban újra kirajzolja, amikor a nagyítás 
 nem változik (jellemzően 5–40 ms alatt); addig az előző rajzolat nagyul, így a csippentés
 folyamatos marad, és a kép a megállás után élesedik ki. Amit ismer: alakzatok, útvonalak,
 színátmenetek, vágás, maszk, minta, `<style>` stíluslap, szöveg (a rendszer betűtípusaival),
-beágyazott képek; a nitrosvg betöltés előtt négy dolgot javít, amit a lunasvg rosszul kezelne:
-a `svg:` előtagos elemeket (LibreOffice), a CSS `var(--x, tartalék)` színeket (a VS Code képei), az
-SVG 1.1 szerinti sortöréseket a szövegben (régi exportálók sorokra tördelik a szavakat) és az
-útvonalakban ismételt lezárást (`ZZ`), ami után az útvonal többi része elveszett. Amit nem: szűrők (az árnyék és az elmosás kimarad), HTML-feliratok
+beágyazott képek; a nitrosvg betöltés előtt három dolgot javít, amit a lunasvg rosszul kezelne:
+a `svg:` előtagos elemeket (LibreOffice), a CSS `var(--x, tartalék)` színeket (a VS Code képei) és
+az SVG 1.1 szerinti sortöréseket a szövegben (régi exportálók sorokra tördelik a szavakat). A
+`patches/lunasvg.patch` (a `scripts/get-deps.sh` alkalmazza) magát a lunasvg-t javítja: az ismételt
+lezárás (`ZZ`) után az útvonal többi része elveszett, nagy nagyításnál pedig a maszkok az egész elem
+méretű rétegeket foglaltak (összeomlás). Amit nem: szűrők (az árnyék és az elmosás kimarad), HTML-feliratok
 `<foreignObject>`-ben (draw.io-ábrák), SVG-betűtípusok és a csak szimbólumokat tartalmazó
 sprite-fájlok, amelyek nem rajzolnak semmit. Egy Macről összegyűjtött 883 SVG-ből (ikonok, logók,
 ábrák, Illustrator-exportok) 867 nyílik meg; a többi 16 böngészőben sem rajzol semmit.

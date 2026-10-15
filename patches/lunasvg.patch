@@ -1,0 +1,52 @@
+lunasvg / plutovg fixes for nitroview (scripts/get-deps.sh applies this after downloading):
+- plutovg_path_parse rejected a repeated closepath ("ZZ", valid SVG) and dropped the rest of
+  the path (https://github.com/sammycage/plutovg/pull/90)
+- mask and clip-path layers were as large as the whole element on the target (not clipped to
+  it like group layers): zoomed in far, huge allocations, then a crash
+- plutovg_surface_create cleared height * stride bytes computed in int (overflow above 2 GB)
+
+--- a/plutovg/source/plutovg-path.c
++++ b/plutovg/source/plutovg-path.c
+@@ -902,9 +902,8 @@
+             current_x = values[3];
+             current_y = values[4];
+         } else if(command == 'Z' || command == 'z') {
+-            if(last_command == 'Z' || last_command == 'z')
+-                return false;
+-            plutovg_path_close(path);
++            if(last_command != 'Z' && last_command != 'z')
++                plutovg_path_close(path); // a repeated closepath is valid and changes nothing
+             current_x = start_x;
+             current_y = start_y;
+         } else {
+--- a/plutovg/source/plutovg-surface.c
++++ b/plutovg/source/plutovg-surface.c
+@@ -30,7 +30,7 @@
+ {
+     plutovg_surface_t* surface = plutovg_surface_create_uninitialized(width, height);
+     if(surface)
+-        memset(surface->data, 0, surface->height * surface->stride);
++        memset(surface->data, 0, (size_t)surface->height * surface->stride);
+     return surface;
+ }
+ 
+--- a/source/svgelement.cpp
++++ b/source/svgelement.cpp
+@@ -1056,7 +1056,7 @@
+ {
+     if(state.hasCycleReference(this))
+         return;
+-    auto maskImage = Canvas::create(state.currentTransform().mapRect(state.paintBoundingBox()));
++    auto maskImage = Canvas::create(state.currentTransform().mapRect(state.paintBoundingBox()).intersected(state.canvas()->extents()));
+     auto currentTransform = state.currentTransform() * localTransform();
+     if(m_clipPathUnits.value() == Units::ObjectBoundingBox) {
+         auto bbox = state.fillBoundingBox();
+@@ -1197,7 +1197,7 @@
+ {
+     if(state.hasCycleReference(this))
+         return;
+-    auto maskImage = Canvas::create(state.currentTransform().mapRect(state.paintBoundingBox()));
++    auto maskImage = Canvas::create(state.currentTransform().mapRect(state.paintBoundingBox()).intersected(state.canvas()->extents()));
+     maskImage->clipRect(maskRect(state.element()), FillRule::NonZero, state.currentTransform());
+ 
+     auto currentTransform = state.currentTransform();

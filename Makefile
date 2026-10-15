@@ -222,7 +222,8 @@ define svg_lib
 	@printf '%s\n' $(SVG_CXX) | xargs -n1 -P$(JOBS) sh -c '$(CXX) -std=c++17 -fno-exceptions -fno-rtti $(1) -O3 -w $(SVG_DEFS) -c "$$0" -o $(@D)/svgobj/$$(basename "$$0").o'
 	@rm -f $@ && ar rcs $@ $(@D)/svgobj/*.o
 endef
-build/libnitrosvg.a: src/nitrosvg.cpp src/nitrosvg.h
+SVG_STAMP = $(wildcard $(LUNA)/.stamp-*)   # changes with the lunasvg commit / patches/lunasvg.patch
+build/libnitrosvg.a: src/nitrosvg.cpp src/nitrosvg.h $(SVG_STAMP)
 	$(call svg_lib,$(CPUFLAGS))
 
 # rebuild the viewer when the optional parts change
@@ -264,7 +265,7 @@ ljt_has = $(filter $(1),$(shell lipo -archs $(LJT)/lib/libturbojpeg.a 2>/dev/nul
 build/app-%/png_wuffs.o: src/png_wuffs.c src/png_wuffs.h
 	@mkdir -p $(@D)
 	$(CC) -arch $* $(MAC_MIN) -O3 $(APPCPU_$*) -w -c $< -o $@
-build/app-%/libnitrosvg.a: src/nitrosvg.cpp src/nitrosvg.h
+build/app-%/libnitrosvg.a: src/nitrosvg.cpp src/nitrosvg.h $(SVG_STAMP)
 	$(call svg_lib,-arch $* $(MAC_MIN) $(APPCPU_$*))
 build/app-%/nitroview: src/nitroview.m build/shaders.inc $(DEC_SRC) $(DEC_HDR) $(if $(filter 1,$(WUFFS)),build/app-%/png_wuffs.o) \
                        $(if $(filter 1,$(SVG)),build/app-%/libnitrosvg.a) build/.config-$(CONFIG) Makefile

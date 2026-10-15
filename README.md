@@ -148,10 +148,11 @@ beyond that, the visible part is rendered again at screen resolution once the zo
 been still for ~80 ms (typically 5–40 ms); until then the previous rendering is scaled, so pinching
 stays smooth and the picture sharpens when it stops. Supported: shapes, paths, gradients, clipping,
 masks, patterns, `<style>` style sheets, text (with the system fonts), embedded images; before
-parsing, nitrosvg also fixes four things lunasvg would get wrong: `svg:`-prefixed elements
-(LibreOffice), CSS `var(--x, fallback)` colours (VS Code's images), SVG 1.1 line breaks in text
-(old exporters split words over lines) and repeated closepath (`ZZ`) in path data, after which
-the rest of the path was lost. Not
+parsing, nitrosvg also fixes three things lunasvg would get wrong: `svg:`-prefixed elements
+(LibreOffice), CSS `var(--x, fallback)` colours (VS Code's images) and SVG 1.1 line breaks in text
+(old exporters split words over lines). `patches/lunasvg.patch` (applied by `scripts/get-deps.sh`)
+fixes lunasvg itself: a repeated closepath (`ZZ`) lost the rest of the path, and masks zoomed in
+far allocated layers the size of the whole element (a crash). Not
 supported: filters (drop shadows and blurs are left out), HTML labels in `<foreignObject>` (draw.io
 diagrams), SVG fonts and symbol-only sprite files, which draw nothing. Of 883 SVGs collected from a
 Mac (icons, logos, diagrams, Illustrator exports) 867 open; the 16 others draw nothing in a browser

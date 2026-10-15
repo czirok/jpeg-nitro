@@ -22,12 +22,15 @@ if [ ! -f wuffs.c ]; then
   curl -fsSL -o wuffs.c https://raw.githubusercontent.com/google/wuffs/main/release/c/wuffs-unsupported-snapshot.c
 fi
 
-if [ ! -f lunasvg/.commit-$LUNASVG_COMMIT ]; then
+# + patches/lunasvg.patch (fixes not upstream yet; re-applied when the patch changes)
+LUNASVG_STAMP=$LUNASVG_COMMIT-$(cksum < ../patches/lunasvg.patch | cut -d' ' -f1)
+if [ ! -f lunasvg/.stamp-$LUNASVG_STAMP ]; then
   rm -rf lunasvg lunasvg-$LUNASVG_COMMIT
   curl -fsSL -o lunasvg.tar.gz https://github.com/sammycage/lunasvg/archive/$LUNASVG_COMMIT.tar.gz
   tar xf lunasvg.tar.gz && rm lunasvg.tar.gz
+  (cd lunasvg-$LUNASVG_COMMIT && patch -p1 -s < ../../patches/lunasvg.patch)
   mv lunasvg-$LUNASVG_COMMIT lunasvg
-  touch lunasvg/.commit-$LUNASVG_COMMIT
+  touch lunasvg/.stamp-$LUNASVG_STAMP
 fi
 
 if [ ! -x tools/nasm/bin/nasm ]; then
