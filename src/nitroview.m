@@ -39,6 +39,7 @@
 #endif
 #ifdef NV_CDR
 #include "nitrocdr.h"    // optional CorelDRAW rendering (libcdr + plutovg)
+#include <stdatomic.h>
 #endif
 #if defined(NV_SVG) || defined(NV_CDR)
 #define NV_VECTOR 1      // vector images: rendered again, sharp, when zoomed in
@@ -86,6 +87,7 @@ typedef enum { KIND_YUV = 0, KIND_BGRA = 1, KIND_PNG = 2, KIND_PLANAR = 3 } Kind
 @property(nonatomic) VectorRender vectorRender;
 @property(nonatomic) void (*vectorFree)(void *);
 @property(nonatomic) double vectorScale;     // decoded pixels per document unit
+@property(nonatomic) int pages, page;        // a multi-page document (CDR): page count, the page shown (from 0)
 @end
 @implementation Decoded {
     int _pw[3], _ph[3];
@@ -411,17 +413,61 @@ static Decoded *decode_svg(NSData *data, Decoded *d, BufferPool *pool, size_t al
 #endif
 
 #ifdef NV_CDR
-// CorelDRAW (CDR, CMX): the first page (TODO: paging through the pages of a document)
+// CorelDRAW (CDR, CMX): one page of the document; [ and ] show the others (cdr_page), sharing
+// the loaded document (loading a large plan takes seconds, drawing a page much less)
+typedef struct {
+    nitrocdr *cdr;
+    _Atomic int *refs;   // Decodeds sharing cdr
+    int page;
+} CdrPage;
 static int cdr_render(void *doc, uint8_t *bgra, int w, int h, size_t pitch, double scale, double x0, double y0) {
-    return nitrocdr_render(doc, 0, bgra, w, h, pitch, scale, x0, y0);
+    CdrPage *p = doc;
+    return nitrocdr_render(p->cdr, p->page, bgra, w, h, pitch, scale, x0, y0);
 }
-static void cdr_free(void *doc) { nitrocdr_free(doc); }
+static void cdr_free(void *doc) {
+    CdrPage *p = doc;
+    if (atomic_fetch_sub(p->refs, 1) == 1) {
+        nitrocdr_free(p->cdr);
+        free(p->refs);
+    }
+    free(p);
+}
+static Decoded *decode_cdr_page(nitrocdr *cdr, _Atomic int *refs, int page, Decoded *d, BufferPool *pool, size_t align,
+                                double t1) {
+    CdrPage *p = malloc(sizeof *p);
+    if (!p) return nil;
+    atomic_fetch_add(refs, 1);
+    *p = (CdrPage){cdr, refs, page};
+    double w, h;
+    nitrocdr_size(cdr, page, &w, &h);
+    d = decode_vector(p, w, h, cdr_render, cdr_free, MODE_CDR, d, pool, align, t1);   // (frees p on failure)
+    d.pages = nitrocdr_pages(cdr);
+    d.page = page;
+    return d;
+}
 static Decoded *decode_cdr(NSData *data, Decoded *d, BufferPool *pool, size_t align, double t1) {
     nitrocdr *cdr = nitrocdr_load(data.bytes, data.length);
-    if (!cdr) return nil;
-    double w, h;
-    nitrocdr_size(cdr, 0, &w, &h);
-    return decode_vector(cdr, w, h, cdr_render, cdr_free, MODE_CDR, d, pool, align, t1);
+    _Atomic int *refs = cdr ? malloc(sizeof *refs) : NULL;
+    if (!refs) {
+        if (cdr) nitrocdr_free(cdr);
+        return nil;
+    }
+    atomic_init(refs, 1);   // (this function's own reference, dropped below)
+    d = decode_cdr_page(cdr, refs, 0, d, pool, align, t1);
+    if (atomic_fetch_sub(refs, 1) == 1) {   // the first page failed
+        nitrocdr_free(cdr);
+        free(refs);
+    }
+    return d;
+}
+// Another page of the document d shows (a new Decoded, nil if it cannot be drawn).
+static Decoded *cdr_page(Decoded *d, int page, BufferPool *pool, size_t align) {
+    if (d.mode != MODE_CDR || !d.vector || page < 0 || page >= d.pages) return nil;
+    CdrPage *p = d.vector;
+    double t1 = now_ms();
+    Decoded *n = decode_cdr_page(p->cdr, p->refs, page, [Decoded new], pool, align, t1);
+    n.read_ms = d.read_ms;
+    return n;
 }
 #endif
 
@@ -743,6 +789,9 @@ typedef struct {
 - (void)focus:(NSInteger)cur direction:(int)dir;
 // New file list; the decoded image of oldIndex (if any) is kept as newIndex.
 - (void)replaceFiles:(NSArray<NSString *> *)files keep:(NSInteger)oldIndex as:(NSInteger)newIndex;
+// Multi-page documents: draws another page of image i in the background; it replaces the
+// decoded image and onDecoded reports it (nothing happens if i was paged away or evicted).
+- (void)showPage:(int)page of:(NSInteger)i;
 @property(nonatomic, copy) void (^onDecoded)(NSInteger index);
 @end
 
@@ -806,6 +855,24 @@ typedef struct {
     _gen++;
     [_cond signal];
     [_cond unlock];
+}
+- (void)showPage:(int)page of:(NSInteger)i {
+#ifdef NV_CDR
+    Decoded *d = [self get:i];
+    if (!d || page == d.page || page < 0 || page >= d.pages) return;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INTERACTIVE, 0), ^{
+        Decoded *n;
+        @autoreleasepool { n = cdr_page(d, page, self->_pool, self->_align); }
+        if (!n) return;
+        [self->_cond lock];
+        BOOL current = self->_cache[@(i)] == d;
+        if (current) self->_cache[@(i)] = n;
+        [self->_cond unlock];
+        [self recycle:current ? d : n];
+        void (^cb)(NSInteger) = self.onDecoded;
+        if (current && cb) dispatch_async(dispatch_get_main_queue(), ^{ cb(i); });
+    });
+#endif
 }
 - (void)focus:(NSInteger)cur direction:(int)dir {
     [_cond lock];
@@ -1033,6 +1100,7 @@ static NSArray<NSString *> *dropped_paths(id<NSDraggingInfo> info);
                                                  d.height, d.decode_ms]
                     : [NSString stringWithFormat:@"%@  (%ld/%lu)  %@", name, _index + 1, _files.count,
                                                  [_loader failed:_index] ? @"CANNOT DECODE (unsupported or damaged)" : @"loading..."];
+    if (d.pages > 1) t = [t stringByAppendingFormat:@"  [page %d/%d]", d.page + 1, d.pages];
     if (_slideMs > 0)
         t = [t stringByAppendingFormat:@"   %@", _paused ? @"[slideshow paused: P]"
                                                      : [NSString stringWithFormat:@"[slideshow %g ms]", _slideMs]];
@@ -1399,6 +1467,7 @@ static int debug_zoom(void) {   // NV_DEBUG_ZOOM=1: log wheel / pinch events and
     case '-': [self zoomBy:M_SQRT1_2 image:d view:ds]; break;
     case '0': [self fitToScreen]; break;
     case 'Z': [self zoomFit]; break;   // (test code only, not the keyboard)
+    case '[': case ']': if (d.pages > 1) [_loader showPage:d.page + (k == ']' ? 1 : -1) of:_index]; break;
     case '1': case '2': case '3': case '4': case '5': case '6': case '7': case '8':
         [self zoomTo:k - '0' image:d view:ds];
         break;
@@ -1432,6 +1501,13 @@ static int debug_zoom(void) {   // NV_DEBUG_ZOOM=1: log wheel / pinch events and
         case 'w': case 'W': [self windowToImage]; return;
         default: break;
         }
+    }
+    // [ ] (Option+F / G on a Hungarian keyboard, or the keys where US has them): the pages of a document
+    unichar typed = e.characters.length == 1 ? [e.characters characterAtIndex:0] : 0;
+    if (cur && cur.pages > 1 && (typed == '[' || typed == ']' || e.keyCode == 33 || e.keyCode == 30)) {
+        _zoomed = NO;   // (pages may differ in size)
+        [_loader showPage:cur.page + (typed == ']' || (typed != '[' && e.keyCode == 30) ? 1 : -1) of:_index];
+        return;
     }
     double step = (e.modifierFlags & NSEventModifierFlagShift) ? 0.5 : 0.125;
     CGSize ds = self.drawableSize;

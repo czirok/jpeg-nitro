@@ -42,6 +42,7 @@ Also runs on Apple Silicon (M1 MacBook Air, see [below](#apple-silicon-m1)); the
 | PgDn / Space | next image |
 | PgUp / Backspace | previous image |
 | Home / End | first / last |
+| [ / ] | previous / next page of a multi-page CorelDRAW drawing (title: [page 2/5]) |
 | + / − | zoom in / out (√2 steps, stops exactly at 100% and at fit) |
 | 0 | fit to the screen: small images are enlarged too (stays on while paging, until W) |
 | 1 | actual size: one image pixel = one screen pixel |
@@ -164,8 +165,8 @@ either.
 LibreOffice Draw too) reads the drawing; nitrocdr (`src/nitrocdr.cpp`) records what it reports as a
 display list and draws it with plutovg directly, without an SVG step, so embedded scans and photos
 stay decoded bitmaps in memory. The shown area is the drawing's bounding box (with a small margin), not
-the page size set in the file, so a small logo fills the window. Paging, zooming and the sharp detail work as for SVG (only the first
-page of a multi-page document for now). `patches/libcdr.patch` fixes libcdr for this: open paths are
+the page size set in the file, so a small logo fills the window. Paging, zooming and the sharp detail work as for SVG ([ and ] switch between
+the pages of a multi-page document). `patches/libcdr.patch` fixes libcdr for this: open paths are
 not filled, text keeps its rotation and its horizontal stretch and is placed at its real origin, `CMYK100` colours (CorelDRAW
 2022) are not white, objects on hidden layers are skipped (an imported PDF keeps its switched-off
 layers as hidden layers), and ICU is replaced by iconv (code pages; without a charset, windows-1250

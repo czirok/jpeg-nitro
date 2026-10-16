@@ -43,6 +43,7 @@ Apple Siliconon is fut (M1-es MacBook Air, lásd lent); ott az IDCT az AVX2 hely
 | PgDn / Space | következő kép |
 | PgUp / Backspace | előző kép |
 | Home / End | első / utolsó |
+| [ / ] | többoldalas CorelDRAW-rajz előző / következő oldala (címsor: [page 2/5]) |
 | + / − | nagyítás / kicsinyítés (√2-es lépések, pontosan megáll 100%-nál és az illesztett méretnél) |
 | 0 | illesztés a képernyőhöz: a kis képeket is felnagyítja (lapozáskor is megmarad, a W-ig) |
 | 1 | eredeti méret: egy képpixel = egy képernyőpixel |
@@ -118,7 +119,7 @@ LibreOffice Draw is ezt használja) olvassa be a rajzot; a nitrocdr (`src/nitroc
 gyűjti, amit átad, és közvetlenül a plutovg-vel rajzolja ki, SVG nélkül, így a beágyazott
 szkennelések és fotók bitképként maradnak a memóriában. A megjelenített terület a rajz befoglaló kerete (kis margóval), nem
 a fájlban beállított lapméret, így egy kis logó is kitölti az ablakot. A lapozás, a nagyítás és az éles részlet úgy
-megy, mint az SVG-nél (többoldalas dokumentumból egyelőre csak az első oldal). A
+megy, mint az SVG-nél (többoldalas dokumentum oldalai között a [ és ] vált). A
 `patches/libcdr.patch` ehhez javítja a libcdr-t: a nyitott vonalak nincsenek kitöltve, a szöveg
 megtartja a forgatását és a vízszintes nyújtását, és a valódi kezdőpontjára kerül, a `CMYK100` színek (CorelDRAW 2022) nem
 fehérek, a rejtett rétegek elemei kimaradnak (egy importált PDF a kikapcsolt rétegeit rejtett
