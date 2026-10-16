@@ -186,7 +186,8 @@ family); a missing font is replaced by a similar one, so its text may run a litt
 shorter. Lines are never thinner than one device pixel, as in CorelDRAW. Not supported: arrowheads, Corel's own vector and
 bitmap pattern fills. On 216
 CDRs collected from a Mac (architectural plans from ArchiCAD PDFs, network maps, logos) every file
-opens; the median takes 20 ms, the biggest plans 0.5–1.8 s on an Intel i9 (mostly libcdr's parsing). On macOS the C++ code
+opens; on an Intel i9 the median takes 20 ms, the 76 files over 1 MB 230 ms on average, the
+biggest plan 1.8 s (mostly libcdr's parsing). On macOS the C++ code
 (libcdr, librevenge, lunasvg) allocates through [mimalloc](https://github.com/microsoft/mimalloc):
 loading a big plan makes millions of small allocations, and with it plans load 20–25% faster on
 Intel and Apple Silicon too (`make MIMALLOC=0`: the system malloc).

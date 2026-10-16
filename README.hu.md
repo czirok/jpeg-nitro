@@ -139,8 +139,8 @@ a /System/Library/Fonts és a ~/Library/Fonts mappából veszi (a Bitstream-neve
 BT”, a családra képződnek le); hiányzó font helyett hasonlót használ, ilyenkor a szöveg kicsit
 hosszabb vagy rövidebb lehet. A vonalak legalább egy képpont szélesek, mint a CorelDRAW-ban. Amit nem tud: nyílhegyek, a Corel saját vektoros és
 bitképes mintakitöltései. Egy Macről összegyűjtött 216 CDR (ArchiCAD-PDF-ből készült alaprajzok,
-hálózati térképek, logók) mind megnyílik; a medián 20 ms, a legnagyobb tervrajzok 0,5–1,8 s egy
-Intel i9-en (nagyrészt a libcdr feldolgozása). macOS-en a C++ kód (libcdr,
+hálózati térképek, logók) mind megnyílik; egy Intel i9-en a medián 20 ms, a 76 darab 1 MB-nál nagyobb
+fájl átlagosan 230 ms, a legnagyobb tervrajz 1,8 s (nagyrészt a libcdr feldolgozása). macOS-en a C++ kód (libcdr,
 librevenge, lunasvg) a [mimalloc](https://github.com/microsoft/mimalloc)-kal foglal memóriát: egy nagy
 terv betöltése több millió apró foglalással jár, és így Intelen és Apple Siliconon is 20–25%-kal
 gyorsabban töltődnek be a tervek (`make MIMALLOC=0`: a rendszer malloc-ja).
