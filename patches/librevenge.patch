@@ -1,6 +1,14 @@
-librevenge addition for nitrocdr (scripts/get-deps.sh applies this after downloading):
+librevenge changes for nitrocdr (scripts/get-deps.sh applies this after downloading):
 - RVNGProperty::getBinaryData(): the data of a binary property (embedded images) without
   converting it to base64 and back
+- property lists are moved, not deep-copied: RVNGPropertyList / RVNGPropertyListVector move
+  constructors, RVNGPropertyListVector::append(RVNGPropertyList &&), at() and
+  RVNGPropertyList::insert(name, RVNGPropertyListVector &&); inserting a property no longer
+  clones it once more on its way into the map (RVNGPropertyListElement is moved);
+  LIBREVENGE_PROPERTYLIST_MOVE tells the libcdr fork it can use these
+- RVNGPropertyList::insert(name, string) tries the number / unit parsers (slow: boost::spirit
+  rebuilding its tables) only for strings that can start a number
+Together with the libcdr fork's use of them, a big ArchiCAD plan (17 MB CDR) loads 2.7 x faster.
 
 --- a/inc/librevenge/RVNGProperty.h
 +++ b/inc/librevenge/RVNGProperty.h
@@ -38,3 +46,203 @@ librevenge addition for nitrocdr (scripts/get-deps.sh applies this after downloa
  	virtual RVNGProperty *clone() const;
  
  private:
+--- a/inc/librevenge/RVNGPropertyList.h
++++ b/inc/librevenge/RVNGPropertyList.h
+@@ -35,11 +35,18 @@
+ class RVNGPropertyListIterImpl;
+ class RVNGPropertyListVector;
+ 
++// property lists can be moved (RVNGPropertyListVector::at(), append(&&), insert(name, vector &&))
++#define LIBREVENGE_PROPERTYLIST_MOVE 1
++
+ class REVENGE_API RVNGPropertyList
+ {
+ public:
+ 	RVNGPropertyList();
+ 	RVNGPropertyList(const RVNGPropertyList &);
++	// moved, not copied: std::vector<RVNGPropertyList> (a path's nodes) grows without deep copies
++	// (only destroying or assigning the moved-from list is allowed)
++	RVNGPropertyList(RVNGPropertyList &&) noexcept;
++	RVNGPropertyList &operator=(RVNGPropertyList &&) noexcept;
+ 	virtual ~RVNGPropertyList();
+ 	void insert(const char *name, RVNGProperty *prop);
+ 	void insert(const char *name, const char *val);
+@@ -50,6 +57,7 @@
+ 	void insert(const char *name, const unsigned char *buffer, const unsigned long bufferSize);
+ 	void insert(const char *name, const RVNGBinaryData &data);
+ 	void insert(const char *name, const RVNGPropertyListVector &vec);
++	void insert(const char *name, RVNGPropertyListVector &&vec);   // (moved: no deep copy)
+ 	void remove(const char *name);
+ 	void clear();
+ 	bool empty() const;
+--- a/src/lib/RVNGPropertyList.cpp
++++ b/src/lib/RVNGPropertyList.cpp
+@@ -105,6 +105,9 @@
+ 	 */
+ 	RVNGPropertyListElement(RVNGProperty *prop, RVNGPropertyListVector *vec)
+ 		: m_prop(prop), m_vec(vec) {}
++	// moved into the map (inserting a property cloned it once more, then dropped the original)
++	RVNGPropertyListElement(RVNGPropertyListElement &&elem) noexcept = default;
++	RVNGPropertyListElement &operator=(RVNGPropertyListElement &&elem) noexcept = default;
+ 	~RVNGPropertyListElement()
+ 	{
+ 	}
+@@ -170,7 +173,7 @@
+ 		i->second.m_prop.reset(prop);
+ 		return;
+ 	}
+-	m_map.insert(i, std::map<std::string, RVNGPropertyListElement>::value_type(name, RVNGPropertyListElement(prop, nullptr)));
++	m_map.emplace_hint(i, name, RVNGPropertyListElement(prop, nullptr));
+ }
+ 
+ void RVNGPropertyListImpl::insert(const char *name, RVNGPropertyListVector *vec)
+@@ -182,7 +185,7 @@
+ 		i->second.m_vec.reset(vec);
+ 		return;
+ 	}
+-	m_map.insert(i, std::map<std::string, RVNGPropertyListElement>::value_type(name, RVNGPropertyListElement(nullptr, vec)));
++	m_map.emplace_hint(i, name, RVNGPropertyListElement(nullptr, vec));
+ }
+ 
+ void RVNGPropertyListImpl::remove(const char *name)
+@@ -210,10 +213,22 @@
+ }
+ 
+ RVNGPropertyList::RVNGPropertyList(const RVNGPropertyList &propList) :
+-	m_impl(new RVNGPropertyListImpl(*(propList.m_impl)))
++	m_impl(propList.m_impl ? new RVNGPropertyListImpl(*(propList.m_impl)) : new RVNGPropertyListImpl())
+ {
+ }
+ 
++RVNGPropertyList::RVNGPropertyList(RVNGPropertyList &&propList) noexcept :
++	m_impl(propList.m_impl)
++{
++	propList.m_impl = nullptr;
++}
++
++RVNGPropertyList &RVNGPropertyList::operator=(RVNGPropertyList &&propList) noexcept
++{
++	std::swap(m_impl, propList.m_impl);
++	return *this;
++}
++
+ RVNGPropertyList::~RVNGPropertyList()
+ {
+ 	delete m_impl;
+@@ -241,15 +256,20 @@
+ 
+ void RVNGPropertyList::insert(const char *name, const RVNGString &val)
+ {
++	// only a string that can start a number is tried as one (the parsers are slow: a path's
++	// "librevenge:path-action" values went through them for every node)
++	const char c = val.empty() ? 0 : val.cstr()[0];
++	const bool number = (c >= '0' && c <= '9') || c == '-' || c == '+' || c == '.' || c == ' ' || c == '\t' ||
++	                    c == 'n' || c == 'N' || c == 'i' || c == 'I';
+ 	int valInt = 0;
+-	if (findInt(val, valInt))
++	if (number && findInt(val, valInt))
+ 	{
+ 		insert(name, valInt);
+ 		return;
+ 	}
+ 	double valDouble = 0.0;
+ 	RVNGUnit valUnit;
+-	if (findDouble(val, valDouble, valUnit))
++	if (number && findDouble(val, valDouble, valUnit))
+ 	{
+ 		insert(name, valDouble, valUnit);
+ 		return;
+@@ -292,6 +312,11 @@
+ 	m_impl->insert(name, static_cast<RVNGPropertyListVector *>(vec.clone()));
+ }
+ 
++void RVNGPropertyList::insert(const char *name, RVNGPropertyListVector &&vec)
++{
++	m_impl->insert(name, new RVNGPropertyListVector(std::move(vec)));
++}
++
+ void RVNGPropertyList::remove(const char *name)
+ {
+ 	m_impl->remove(name);
+--- a/inc/librevenge/RVNGPropertyListVector.h
++++ b/inc/librevenge/RVNGPropertyListVector.h
+@@ -35,6 +35,7 @@
+ {
+ public:
+ 	RVNGPropertyListVector(const RVNGPropertyListVector &);
++	RVNGPropertyListVector(RVNGPropertyListVector &&) noexcept;   // (the moved-from one may only be destroyed)
+ 	RVNGPropertyListVector();
+ 	virtual ~RVNGPropertyListVector();
+ 
+@@ -46,11 +47,13 @@
+ 	RVNGProperty *clone() const;
+ 
+ 	void append(const RVNGPropertyList &elem);
++	void append(RVNGPropertyList &&elem);   // (moved: no deep copy)
+ 	void append(const RVNGPropertyListVector &vec);
+ 	unsigned long count() const;
+ 	bool empty() const;
+ 	void clear();
+ 	const RVNGPropertyList &operator[](unsigned long index) const;
++	RVNGPropertyList &at(unsigned long index);   // (to move an element out)
+ 	RVNGPropertyListVector &operator=(const RVNGPropertyListVector &vect);
+ 
+ 	RVNGString getPropString() const;
+--- a/src/lib/RVNGPropertyListVector.cpp
++++ b/src/lib/RVNGPropertyListVector.cpp
+@@ -20,6 +20,7 @@
+  */
+ 
+ #include <librevenge/librevenge.h>
++#include <utility>
+ #include <vector>
+ 
+ namespace librevenge
+@@ -34,6 +35,10 @@
+ 	{
+ 		m_vector.push_back(elem);
+ 	}
++	void append(RVNGPropertyList &&elem)
++	{
++		m_vector.push_back(std::move(elem));
++	}
+ 	unsigned long count() const
+ 	{
+ 		return m_vector.size();
+@@ -95,6 +100,12 @@
+ {
+ }
+ 
++RVNGPropertyListVector::RVNGPropertyListVector(RVNGPropertyListVector &&vect) noexcept :
++	m_impl(vect.m_impl)
++{
++	vect.m_impl = nullptr;
++}
++
+ RVNGPropertyListVector::RVNGPropertyListVector() :
+ 	m_impl(new RVNGPropertyListVectorImpl)
+ {
+@@ -135,6 +146,11 @@
+ 	m_impl->append(elem);
+ }
+ 
++void RVNGPropertyListVector::append(RVNGPropertyList &&elem)
++{
++	m_impl->append(std::move(elem));
++}
++
+ void RVNGPropertyListVector::append(const RVNGPropertyListVector &vec)
+ {
+ 	std::vector<RVNGPropertyList> &other = vec.m_impl->m_vector;
+@@ -162,6 +178,11 @@
+ 	return m_impl->operator[](index);
+ }
+ 
++RVNGPropertyList &RVNGPropertyListVector::at(unsigned long index)
++{
++	return m_impl->m_vector[index];
++}
++
+ RVNGPropertyListVector &RVNGPropertyListVector::operator=(const RVNGPropertyListVector &vect)
+ {
+ 	m_impl->m_vector = vect.m_impl->m_vector;
