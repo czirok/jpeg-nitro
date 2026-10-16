@@ -5,6 +5,8 @@
 #   - nasm (needed to build libjpeg-turbo's SIMD code) and cmake (via pip), locally
 #   - stb_image.h and wuffs (only for the decoder comparison in bench/bench)
 #   - lunasvg (MIT, with its plutovg): SVG rendering in nitroview
+#   - libcdr + librevenge (MPL-2.0), lcms2 (MIT) and the boost headers: CorelDRAW
+#     drawings in nitroview (sources only; the Makefile compiles them)
 # Nothing is installed system-wide.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -13,6 +15,10 @@ TP=$PWD
 LJT_VER=3.1.2
 NASM_VER=2.16.03
 LUNASVG_COMMIT=90d6ff333862acf3f5551ffbbcb1e45957661881   # 2026-10-15
+LIBCDR_COMMIT=aaa57df5a85f4564d89555e2884b41ccd14d1c64    # 2026-10-13, github.com/LibreOffice/libcdr
+LIBREVENGE_VER=0.0.6
+LCMS2_VER=2.19.1
+BOOST_VER=1.89.0
 JOBS=$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 8)
 
 if [ ! -f stb_image.h ]; then
@@ -31,6 +37,43 @@ if [ ! -f lunasvg/.stamp-$LUNASVG_STAMP ]; then
   (cd lunasvg-$LUNASVG_COMMIT && patch -p1 -s < ../../patches/lunasvg.patch)
   mv lunasvg-$LUNASVG_COMMIT lunasvg
   touch lunasvg/.stamp-$LUNASVG_STAMP
+fi
+
+# CorelDRAW: libcdr + patches/libcdr.patch, librevenge + patches/librevenge.patch (re-applied when
+# a patch changes), lcms2, and the boost headers (only boost/: libcdr and librevenge use
+# header-only parts)
+LIBCDR_STAMP=$LIBCDR_COMMIT-$(cksum < ../patches/libcdr.patch | cut -d' ' -f1)
+if [ ! -f libcdr/.stamp-$LIBCDR_STAMP ]; then
+  rm -rf libcdr libcdr-$LIBCDR_COMMIT
+  curl -fsSL -o libcdr.tar.gz https://github.com/LibreOffice/libcdr/archive/$LIBCDR_COMMIT.tar.gz
+  tar xf libcdr.tar.gz && rm libcdr.tar.gz
+  (cd libcdr-$LIBCDR_COMMIT && patch -p1 -s < ../../patches/libcdr.patch)
+  mv libcdr-$LIBCDR_COMMIT libcdr
+  touch libcdr/.stamp-$LIBCDR_STAMP
+fi
+LIBREVENGE_STAMP=$LIBREVENGE_VER-$(cksum < ../patches/librevenge.patch | cut -d' ' -f1)
+if [ ! -f librevenge/.stamp-$LIBREVENGE_STAMP ]; then
+  rm -rf librevenge librevenge-$LIBREVENGE_VER
+  curl -fsSL -o librevenge.tar.bz2 https://dev-www.libreoffice.org/src/librevenge-$LIBREVENGE_VER.tar.bz2
+  tar xf librevenge.tar.bz2 && rm librevenge.tar.bz2
+  (cd librevenge-$LIBREVENGE_VER && patch -p1 -s < ../../patches/librevenge.patch)
+  mv librevenge-$LIBREVENGE_VER librevenge
+  touch librevenge/.stamp-$LIBREVENGE_STAMP
+fi
+if [ ! -f lcms2/.version-$LCMS2_VER ]; then
+  rm -rf lcms2 lcms2-$LCMS2_VER
+  curl -fsSL -o lcms2.tar.gz https://dev-www.libreoffice.org/src/lcms2-$LCMS2_VER.tar.gz
+  tar xf lcms2.tar.gz && rm lcms2.tar.gz
+  mv lcms2-$LCMS2_VER lcms2
+  touch lcms2/.version-$LCMS2_VER
+fi
+if [ ! -f boost/.version-$BOOST_VER ]; then
+  B=boost_${BOOST_VER//./_}
+  rm -rf boost $B
+  curl -fsSL -o boost.tar.bz2 https://archives.boost.io/release/$BOOST_VER/source/$B.tar.bz2
+  tar xf boost.tar.bz2 $B/boost && rm boost.tar.bz2
+  mkdir boost && mv $B/boost boost/boost && rm -rf $B
+  touch boost/.version-$BOOST_VER
 fi
 
 if [ ! -x tools/nasm/bin/nasm ]; then
@@ -81,4 +124,4 @@ if [ "$(uname -s)" = Darwin ]; then
 elif [ ! -f ljt/lib/libturbojpeg.a ]; then
   build_ljt "$(uname -m)" ljt
 fi
-echo "dependencies ready in third_party/ (libjpeg-turbo $LJT_VER, stb_image, wuffs, lunasvg)"
+echo "dependencies ready in third_party/ (libjpeg-turbo $LJT_VER, stb_image, wuffs, lunasvg, libcdr)"

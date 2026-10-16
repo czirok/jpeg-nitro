@@ -112,6 +112,23 @@ méretű rétegeket foglaltak (összeomlás). Amit nem: szűrők (az árnyék é
 sprite-fájlok, amelyek nem rajzolnak semmit. Egy Macről összegyűjtött 883 SVG-ből (ikonok, logók,
 ábrák, Illustrator-exportok) 867 nyílik meg; a többi 16 böngészőben sem rajzol semmit.
 
+**CorelDRAW** (CDR és CMX, macOS-en, ha a `scripts/get-deps.sh` letöltötte a
+[libcdr](https://github.com/LibreOffice/libcdr)-t): a libcdr (a LibreOffice-é, az Inkscape és a
+LibreOffice Draw is ezt használja) olvassa be a rajzot; a nitrocdr (`src/nitrocdr.cpp`) rajzlistába
+gyűjti, amit átad, és közvetlenül a plutovg-vel rajzolja ki, SVG nélkül, így a beágyazott
+szkennelések és fotók bitképként maradnak a memóriában. A lapozás, a nagyítás és az éles részlet úgy
+megy, mint az SVG-nél (többoldalas dokumentumból egyelőre csak az első oldal). A
+`patches/libcdr.patch` ehhez javítja a libcdr-t: a nyitott vonalak nincsenek kitöltve, a szöveg
+megtartja a forgatását és a valódi kezdőpontjára kerül, a `CMYK100` színek (CorelDRAW 2022) nem
+fehérek, a rejtett rétegek elemei kimaradnak (egy importált PDF a kikapcsolt rétegeit rejtett
+rétegként tartja meg), és az ICU helyett iconv dolgozik (kódlapok; karakterkészlet nélkül
+windows-1250, ha a szövegben ő/ű van); a `patches/librevenge.patch` a beágyazott képeket base64
+nélkül engedi át. A vonalak legalább egy képpont szélesek, mint a CorelDRAW-ban. Amit nem tud:
+nyílhegyek, a Corel saját vektoros mintakitöltései, néhány nagyon régi CDR szövege (a libcdr
+UTF-16-ként olvassa). Egy Macről összegyűjtött 193 CDR (ArchiCAD-PDF-ből készült alaprajzok,
+hálózati térképek, logók) mind megnyílik; a medián 80 ms, a nagy tervrajzok 1–8 s (a libcdr
+feldolgozása, maga a rajzolás 100 ms alatt).
+
 **Színkezelés:** a beágyazott ICC-profilokat minden formátumnál figyelembe veszi (pl. Display P3 az
 iPhone-okról és a Mac-es képernyőképekből, Adobe RGB a szkennelésekből); a profil nélküli képeket
 sRGB-nek tekinti. A dekódolt képpontok változatlanok maradnak, a kirajzoló réteg kapja meg a kép
@@ -502,6 +519,7 @@ make                 # néző; ha megvan a libjpeg-turbo, tartalék dekódernek 
 make TURBOJPEG=0     # libjpeg-turbo nélkül: a többi JPEG-et az Apple ImageIO dekódolja
 make WUFFS=0         # Wuffs nélkül: PNG az Apple ImageIO-val (~1.6× lassabb)
 make SVG=0           # SVG (lunasvg) nélkül
+make CDR=0           # CorelDRAW (libcdr) nélkül
 make app             # nitroview.app a Finderhez: universal (Intel + Apple Silicon), macOS 12-től,
                      # ad-hoc aláírással, ikon: packaging/icon.png
 make zip / make dmg  # nitroview.zip / nitroview.dmg (Alkalmazások mappába húzható) továbbadáshoz
@@ -653,5 +671,6 @@ MIT, lásd [LICENSE](LICENSE). A `scripts/get-deps.sh` által letöltött opcion
 saját licencük van: libjpeg-turbo (BSD-szerű / IJG / zlib), Wuffs (Apache-2.0), stb_image
 (public domain / MIT), lunasvg és plutovg (MIT; a plutovg raszterizálója a FreeType
 „smooth” raszterizálója, FreeType License: portions of this software are copyright © 2014 The
-FreeType Project (www.freetype.org), all rights reserved). Az IDCT a Independent JPEG Group libjpeg-jének jidctint.c
+FreeType Project (www.freetype.org), all rights reserved), libcdr és librevenge (MPL-2.0; a javított
+forrás a third_party/ és a patches/ mappában), lcms2 (MIT), boost (Boost Software License). Az IDCT a Independent JPEG Group libjpeg-jének jidctint.c
 algoritmusát valósítja meg: ez a szoftver részben az Independent JPEG Group munkáján alapul.

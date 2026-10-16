@@ -37,6 +37,14 @@
 #ifdef NV_SVG
 #include "nitrosvg.h"    // optional SVG rendering (lunasvg)
 #endif
+#ifdef NV_CDR
+#include "nitrocdr.h"    // optional CorelDRAW rendering (libcdr + plutovg)
+#endif
+#if defined(NV_SVG) || defined(NV_CDR)
+#define NV_VECTOR 1      // vector images: rendered again, sharp, when zoomed in
+#endif
+// renders a vector document's area into BGRA (see nitrosvg_render / nitrocdr_render)
+typedef int (*VectorRender)(void *doc, uint8_t *bgra, int w, int h, size_t pitch, double scale, double x0, double y0);
 #import <ImageIO/ImageIO.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
@@ -74,15 +82,17 @@ typedef enum { KIND_YUV = 0, KIND_BGRA = 1, KIND_PNG = 2, KIND_PLANAR = 3 } Kind
 @property(nonatomic) double read_ms, decode_ms;
 @property(nonatomic) int mode, bands;
 @property(nonatomic) id<MTLTexture> texture; // converted RGBA + mips (main thread only)
-@property(nonatomic) void *svg;              // SVG: the document (nitrosvg), for sharp zoomed-in views
-@property(nonatomic) double svgScale;        // SVG: decoded pixels per SVG unit
+@property(nonatomic) void *vector;           // SVG / CDR: the document, for sharp zoomed-in views
+@property(nonatomic) VectorRender vectorRender;
+@property(nonatomic) void (*vectorFree)(void *);
+@property(nonatomic) double vectorScale;     // decoded pixels per document unit
 @end
 @implementation Decoded {
     int _pw[3], _ph[3];
     size_t _offset[3], _pitch[3];
 }
-#ifdef NV_SVG
-- (void)dealloc { if (_svg) nitrosvg_free(_svg); }
+#ifdef NV_VECTOR
+- (void)dealloc { if (_vector && _vectorFree) _vectorFree(_vector); }
 #endif
 - (int *)pw { return _pw; }
 - (int *)ph { return _ph; }
@@ -225,7 +235,7 @@ done:
 }
 
 // Decode one file into a Metal buffer. Runs on the decoder thread.
-enum { MODE_TURBOJPEG = -1, MODE_WUFFS = -2, MODE_IMAGEIO = -3, MODE_NITROPNG = -4, MODE_NITROPSD = -5, MODE_SVG = -6 };
+enum { MODE_TURBOJPEG = -1, MODE_WUFFS = -2, MODE_IMAGEIO = -3, MODE_NITROPNG = -4, MODE_NITROPSD = -5, MODE_SVG = -6, MODE_CDR = -7 };
 static int g_nthreads = 0;   // -j
 
 static const char *mode_name(int m) {
@@ -239,6 +249,7 @@ static const char *mode_name(int m) {
     case MODE_NITROPNG: return "nitropng";
     case MODE_NITROPSD: return "nitropsd";
     case MODE_SVG: return "svg";
+    case MODE_CDR: return "cdr";
     default: return "?";
     }
 }
@@ -359,29 +370,58 @@ static Decoded *decode_imageio(NSData *data, Decoded *d, BufferPool *pool, size_
     return d;
 }
 
+#ifdef NV_VECTOR
+// Vector images (SVG, CorelDRAW): rendered once in full here (the long side 1024..4096
+// pixels: small icons are enlarged, huge drawings reduced), over white. Zoomed in further,
+// the viewer renders the visible part again at screen resolution (see ViewerView
+// vectorDetail). Takes over the document (freed with the Decoded).
+static Decoded *decode_vector(void *doc, double w, double h, VectorRender render, void (*vfree)(void *), int mode, Decoded *d,
+                              BufferPool *pool, size_t align, double t1) {
+    double l = MAX(w, h), k = l < 1024 ? 1024 / l : l > 4096 ? 4096 / l : 1;
+    int iw = MAX(1, MIN(MAX_TEX, (int)lround(w * k))), ih = MAX(1, MIN(MAX_TEX, (int)lround(h * k)));
+    id<MTLBuffer> buf = w > 0 && h > 0 ? bgra_buffer(d, iw, ih, pool, align) : nil;
+    if (!buf || render(doc, buf.contents, iw, ih, d.pitch[0], k, 0, 0)) {
+        if (buf) [pool put:buf];
+        vfree(doc);
+        return nil;
+    }
+    d.vector = doc;
+    d.vectorRender = render;
+    d.vectorFree = vfree;
+    d.vectorScale = k;
+    d.colorSpace = srgb_space();
+    d.orientation = 1;
+    bgra_done(d, buf, mode, t1);
+    return d;
+}
+#endif
+
 #ifdef NV_SVG
-// SVG: rendered once in full here (the long side 1024..4096 pixels: small icons are
-// enlarged, huge drawings reduced), over white. Zoomed in further, the viewer renders
-// the visible part again at screen resolution (see ViewerView svgDetail).
+static int svg_render(void *doc, uint8_t *bgra, int w, int h, size_t pitch, double scale, double x0, double y0) {
+    return nitrosvg_render(doc, bgra, w, h, pitch, scale, x0, y0);
+}
+static void svg_free(void *doc) { nitrosvg_free(doc); }
 static Decoded *decode_svg(NSData *data, Decoded *d, BufferPool *pool, size_t align, double t1) {
     nitrosvg *svg = nitrosvg_load(data.bytes, data.length);
     if (!svg) return nil;
     double w, h;
     nitrosvg_size(svg, &w, &h);
-    double l = MAX(w, h), k = l < 1024 ? 1024 / l : l > 4096 ? 4096 / l : 1;
-    int iw = MAX(1, MIN(MAX_TEX, (int)lround(w * k))), ih = MAX(1, MIN(MAX_TEX, (int)lround(h * k)));
-    id<MTLBuffer> buf = bgra_buffer(d, iw, ih, pool, align);
-    if (!buf || nitrosvg_render(svg, buf.contents, iw, ih, d.pitch[0], k, 0, 0)) {
-        if (buf) [pool put:buf];
-        nitrosvg_free(svg);
-        return nil;
-    }
-    d.svg = svg;
-    d.svgScale = k;
-    d.colorSpace = srgb_space();
-    d.orientation = 1;
-    bgra_done(d, buf, MODE_SVG, t1);
-    return d;
+    return decode_vector(svg, w, h, svg_render, svg_free, MODE_SVG, d, pool, align, t1);
+}
+#endif
+
+#ifdef NV_CDR
+// CorelDRAW (CDR, CMX): the first page (TODO: paging through the pages of a document)
+static int cdr_render(void *doc, uint8_t *bgra, int w, int h, size_t pitch, double scale, double x0, double y0) {
+    return nitrocdr_render(doc, 0, bgra, w, h, pitch, scale, x0, y0);
+}
+static void cdr_free(void *doc) { nitrocdr_free(doc); }
+static Decoded *decode_cdr(NSData *data, Decoded *d, BufferPool *pool, size_t align, double t1) {
+    nitrocdr *cdr = nitrocdr_load(data.bytes, data.length);
+    if (!cdr) return nil;
+    double w, h;
+    nitrocdr_size(cdr, 0, &w, &h);
+    return decode_vector(cdr, w, h, cdr_render, cdr_free, MODE_CDR, d, pool, align, t1);
 }
 #endif
 
@@ -428,6 +468,9 @@ static Decoded *decode_file(NSString *path, BufferPool *pool, size_t align) {
     size_t len = data.length;
 #ifdef NV_SVG
     if ([ext isEqualToString:@"svg"]) return decode_svg(data, d, pool, align, t1);
+#endif
+#ifdef NV_CDR
+    if ([ext isEqualToString:@"cdr"] || [ext isEqualToString:@"cmx"]) return decode_cdr(data, d, pool, align, t1);
 #endif
     d.colorSpace = image_colorspace(data);   // tags the display layer (ICC profile or sRGB)
     if (is_png(bytes, len)) {
@@ -902,15 +945,15 @@ static NSArray<NSString *> *dropped_paths(id<NSDraggingInfo> info);
     BOOL _userSized;          // the user resized the window: stop following the image size
     BOOL _selfResizing;       // our own setFrame in progress
     BOOL _fsTransition;       // entering / leaving full screen
-#ifdef NV_SVG
-    // SVG zoomed in beyond its decoded size: the visible part rendered at screen resolution
+#ifdef NV_VECTOR
+    // a vector image (SVG, CDR) zoomed in beyond its decoded size: the visible part rendered at screen resolution
     id<MTLTexture> _detailTex;
     Decoded *_detailFor;
     double _detailScale, _detailRect[4];   // the scale it was rendered for, its image rect (x y w h)
     Decoded *_wantFor;                      // the last requested detail (pending or rendering)
     double _wantScale, _wantRect[4];
     unsigned _detailReq;
-    dispatch_queue_t _svgQueue;
+    dispatch_queue_t _vectorQueue;
 #endif
 }
 - (BOOL)acceptsFirstResponder { return YES; }
@@ -1345,7 +1388,7 @@ static int debug_zoom(void) {   // NV_DEBUG_ZOOM=1: log wheel / pinch events and
     double s = [self placement:d view:ds x0:&x0 y0:&y0];
     DrawParams p = {{(float)(x0 / ds.width * 2 - 1), (float)(1 - y0 / ds.height * 2)},
                     {(float)(2 * iw * s / ds.width), (float)(2 * ih * s / ds.height)},
-                    (uint32_t)d.orientation, (uint32_t)(s >= 2 && s == floor(s) && !d.svg)};
+                    (uint32_t)d.orientation, (uint32_t)(s >= 2 && s == floor(s) && !d.vector)};
     return p;
 }
 
@@ -1425,13 +1468,13 @@ static int debug_zoom(void) {   // NV_DEBUG_ZOOM=1: log wheel / pinch events and
     [self updateTitle];   // fit percentage changes with the window size
 }
 
-#ifdef NV_SVG
-// SVG zoomed in beyond its decoded size (more than one device pixel per decoded pixel):
+#ifdef NV_VECTOR
+// A vector image (SVG, CDR) zoomed in beyond its decoded size (more than one device pixel per decoded pixel):
 // once the zoom / position has been still for a moment, the visible part (+ a margin
 // for panning) is rendered again at screen resolution on a background queue and
 // drawn over the decoded image. Until then the previous detail is drawn where it
 // belongs (scaled), so zooming stays smooth and only sharpens when it stops.
-- (void)svgDetail:(Decoded *)d encoder:(id<MTLRenderCommandEncoder>)re view:(CGSize)ds {
+- (void)vectorDetail:(Decoded *)d encoder:(id<MTLRenderCommandEncoder>)re view:(CGSize)ds {
     if (_detailFor != d) { _detailTex = nil; _detailFor = nil; }
     double iw, ih, x0, y0;
     display_size(d, &iw, &ih);
@@ -1469,28 +1512,29 @@ static int debug_zoom(void) {   // NV_DEBUG_ZOOM=1: log wheel / pinch events and
     unsigned req = ++_detailReq;
     CGRect wr = CGRectMake(want[0], want[1], want[2], want[3]);
     int w = MIN(MAX_TEX, (int)(r - l)), h = MIN(MAX_TEX, (int)(b - t));
-    if (!_svgQueue) _svgQueue = dispatch_queue_create("nitroview.svg", DISPATCH_QUEUE_SERIAL);
+    if (!_vectorQueue) _vectorQueue = dispatch_queue_create("nitroview.vector", DISPATCH_QUEUE_SERIAL);
     __weak ViewerView *ws = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 80 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
         ViewerView *v = ws;
         if (!v || req != v->_detailReq) return;   // moved on meanwhile: a newer request follows
-        double k = d.svgScale;
-        dispatch_async(v->_svgQueue, ^{
+        double k = d.vectorScale;
+        VectorRender render = d.vectorRender;
+        dispatch_async(v->_vectorQueue, ^{
             size_t pitch = (size_t)w * 4;
             uint8_t *px = malloc(pitch * h);
             double t0 = now_ms();
-            int rc = px ? nitrosvg_render(d.svg, px, w, h, pitch, k * s, wr.origin.x / k, wr.origin.y / k) : -1;
+            int rc = px ? render(d.vector, px, w, h, pitch, k * s, wr.origin.x / k, wr.origin.y / k) : -1;
             double ms = now_ms() - t0;
             dispatch_async(dispatch_get_main_queue(), ^{
                 ViewerView *v2 = ws;
-                if (v2 && !rc) [v2 svgDetailDone:d pixels:px w:w h:h scale:s rect:wr ms:ms];
+                if (v2 && !rc) [v2 vectorDetailDone:d pixels:px w:w h:h scale:s rect:wr ms:ms];
                 free(px);
             });
         });
     });
 }
 
-- (void)svgDetailDone:(Decoded *)d pixels:(const uint8_t *)px w:(int)w h:(int)h scale:(double)s
+- (void)vectorDetailDone:(Decoded *)d pixels:(const uint8_t *)px w:(int)w h:(int)h scale:(double)s
                  rect:(CGRect)rect ms:(double)ms {
     if (d != [_loader get:_index]) return;   // paged away
     MTLTextureDescriptor *td = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm
@@ -1512,7 +1556,7 @@ static int debug_zoom(void) {   // NV_DEBUG_ZOOM=1: log wheel / pinch events and
     _detailRect[1] = rect.origin.y;
     _detailRect[2] = rect.size.width;
     _detailRect[3] = rect.size.height;
-    if (getenv("NV_DEBUG_SVG")) fprintf(stderr, "svg detail %dx%d at %.0f%%: %.1f ms\n", w, h, 100 * s, ms);
+    if (getenv("NV_DEBUG_SVG")) fprintf(stderr, "vector detail %dx%d at %.0f%%: %.1f ms\n", w, h, 100 * s, ms);
     self.needsDisplay = YES;
 }
 #endif
@@ -1541,8 +1585,8 @@ static int debug_zoom(void) {   // NV_DEBUG_ZOOM=1: log wheel / pinch events and
         [re setFragmentBytes:&p length:sizeof p atIndex:0];
         [re setFragmentTexture:tex atIndex:0];
         [re drawPrimitives:MTLPrimitiveTypeTriangleStrip vertexStart:0 vertexCount:4];
-#ifdef NV_SVG
-        if (d.svg) [self svgDetail:d encoder:re view:view.drawableSize];
+#ifdef NV_VECTOR
+        if (d.vector) [self vectorDetail:d encoder:re view:view.drawableSize];
 #endif
     }
     [re endEncoding];
@@ -1668,6 +1712,9 @@ static NSArray<NSString *> *collect_files(NSArray<NSString *> *args) {
                                                     @"webp", @"gif", @"bmp", @"psd", @"psb",
 #ifdef NV_SVG
                                                     @"svg",
+#endif
+#ifdef NV_CDR
+                                                    @"cdr", @"cmx",
 #endif
                                                     ]];
             if ([exts containsObject:ext])

@@ -159,6 +159,21 @@ diagrams), SVG fonts and symbol-only sprite files, which draw nothing. Of 883 SV
 Mac (icons, logos, diagrams, Illustrator exports) 867 open; the 16 others draw nothing in a browser
 either.
 
+**CorelDRAW** (CDR and CMX, macOS, when `scripts/get-deps.sh` has fetched
+[libcdr](https://github.com/LibreOffice/libcdr)): libcdr (from LibreOffice, used by Inkscape and
+LibreOffice Draw too) reads the drawing; nitrocdr (`src/nitrocdr.cpp`) records what it reports as a
+display list and draws it with plutovg directly, without an SVG step, so embedded scans and photos
+stay decoded bitmaps in memory. Paging, zooming and the sharp detail work as for SVG (only the first
+page of a multi-page document for now). `patches/libcdr.patch` fixes libcdr for this: open paths are
+not filled, text keeps its rotation and is placed at its real origin, `CMYK100` colours (CorelDRAW
+2022) are not white, objects on hidden layers are skipped (an imported PDF keeps its switched-off
+layers as hidden layers), and ICU is replaced by iconv (code pages; without a charset, windows-1250
+when the text has ő/ű); `patches/librevenge.patch` lets embedded images through without base64.
+Lines are never thinner than one device pixel, as in CorelDRAW. Not supported: arrowheads, Corel's
+own vector pattern fills, the text of some very old CDR files (libcdr reads it as UTF-16). On 193
+CDRs collected from a Mac (architectural plans from ArchiCAD PDFs, network maps, logos) every file
+opens; the median takes 80 ms, big plans 1–8 s (libcdr's parsing, the drawing itself < 100 ms).
+
 **Colour management:** embedded ICC profiles are honoured for every format (e.g. Display P3
 from iPhones and Mac screenshots, Adobe RGB scans); images without a profile are treated as
 sRGB. The decoded pixel values are left as they are and the display layer is tagged with the
@@ -509,7 +524,8 @@ make                 # nitroview; uses libjpeg-turbo as fallback if it is in thi
 make TURBOJPEG=0     # no libjpeg-turbo: other JPEGs go to Apple ImageIO
 make WUFFS=0         # no Wuffs: PNG via Apple ImageIO (~1.6x slower)
 make SVG=0           # no SVG (lunasvg)
-scripts/get-deps.sh  # download + build libjpeg-turbo (macOS: Intel + ARM), stb_image, Wuffs, lunasvg into third_party/ (~30 s)
+make CDR=0           # no CorelDRAW (libcdr)
+scripts/get-deps.sh  # download + build libjpeg-turbo (macOS: Intel + ARM), stb_image, Wuffs, lunasvg, libcdr into third_party/ (~1 min)
 make app             # nitroview.app for the Finder: universal (Intel + Apple Silicon), macOS 12+,
                      # ad-hoc signed, icon from packaging/icon.png
 make zip / make dmg  # nitroview.zip / nitroview.dmg (drag to Applications) for passing it on
@@ -650,6 +666,7 @@ MIT, see [LICENSE](LICENSE). The optional dependencies downloaded by `scripts/ge
 have their own licenses: libjpeg-turbo (BSD-style / IJG / zlib), Wuffs (Apache-2.0),
 stb_image (public domain / MIT), lunasvg and plutovg (MIT; plutovg's rasterizer is FreeType's
 smooth rasterizer, FreeType License: portions of this software are copyright © 2014 The FreeType
-Project (www.freetype.org), all rights reserved). The inverse DCT implements the algorithm of jidctint.c from the
+Project (www.freetype.org), all rights reserved), libcdr and librevenge (MPL-2.0; the patched
+sources are in third_party/ and patches/), lcms2 (MIT), boost (Boost Software License). The inverse DCT implements the algorithm of jidctint.c from the
 Independent JPEG Group's libjpeg: this software is based in part on the work of the
 Independent JPEG Group.

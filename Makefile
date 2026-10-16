@@ -5,6 +5,7 @@
 #   make TURBOJPEG=0     no libjpeg-turbo: JPEGs nitrojpeg can't decode go to Apple ImageIO
 #   make WUFFS=0         no Wuffs: PNG is decoded by Apple ImageIO (~1.8x slower)
 #   make SVG=0           no SVG support (lunasvg, from scripts/get-deps.sh)
+#   make CDR=0           no CorelDRAW support (libcdr, from scripts/get-deps.sh; needs SVG)
 #   make app             nitroview.app bundle, so the Finder can open images with it: universal
 #                        (x86_64 + arm64, macOS 12+); MAC_ARCHS=x86_64 for one architecture only
 #   make zip / make dmg  nitroview.zip / nitroview.dmg (drag to Applications) of the app
@@ -89,6 +90,11 @@ FLATPAK_BUNDLE   := nitroview-gnome.flatpak
 WUFFS      ?= $(if $(wildcard third_party/wuffs.c),1,0)
 LUNA       := third_party/lunasvg
 SVG        ?= $(if $(wildcard $(LUNA)/include/lunasvg.h),1,0)
+LIBCDR     := third_party/libcdr
+LIBREVENGE := third_party/librevenge
+LCMS       := third_party/lcms2
+BOOST      := third_party/boost
+CDR        ?= $(if $(and $(filter 1,$(SVG)),$(wildcard $(LIBCDR)/inc/libcdr/libcdr.h),$(wildcard $(LIBREVENGE)/inc/librevenge/librevenge.h),$(wildcard $(LCMS)/include/lcms2.h),$(wildcard $(BOOST)/boost/optional.hpp)),1,0)
 CXX        := clang++
 JOBS       := $(shell sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 8)
 
@@ -99,6 +105,11 @@ endif
 ifeq ($(WUFFS),1)
 VIEWER_DEFS += -DNV_WUFFS
 VIEWER_OBJS += build/png_wuffs.o
+endif
+ifeq ($(CDR),1)   # (before SVG: it uses the plutovg in libnitrosvg.a)
+VIEWER_DEFS += -DNV_CDR
+VIEWER_OBJS += build/libnitrocdr.a
+VIEWER_LIBS += -liconv -lz
 endif
 ifeq ($(SVG),1)
 VIEWER_DEFS += -DNV_SVG
@@ -226,8 +237,31 @@ SVG_STAMP = $(wildcard $(LUNA)/.stamp-*)   # changes with the lunasvg commit / p
 build/libnitrosvg.a: src/nitrosvg.cpp src/nitrosvg.h $(SVG_STAMP)
 	$(call svg_lib,$(CPUFLAGS))
 
+# optional CorelDRAW rendering: libcdr + librevenge (its core and streams; the SVG generator is
+# part of the core: libcdr renders full colour pattern fills with it) +
+# lcms2 + src/nitrocdr.cpp in one static library, compiled once (in parallel); drawn with
+# the plutovg of libnitrosvg.a. $(1): compiler flags (architecture, CPU)
+CDR_C    = $(wildcard $(LCMS)/src/*.c)
+CDR_CXX  = $(wildcard $(LIBCDR)/src/lib/*.cpp) src/nitrocdr.cpp \
+           $(addprefix $(LIBREVENGE)/src/lib/,RVNGBinaryData.cpp RVNGMemoryStream.cpp RVNGProperty.cpp RVNGPropertyList.cpp \
+             RVNGPropertyListVector.cpp RVNGString.cpp RVNGStringVector.cpp RVNGSVGDrawingGenerator.cpp \
+             RVNGStreamImplementation.cpp \
+             RVNGDirectoryStream.cpp RVNGOLEStream.cpp RVNGZipStream.cpp)
+CDR_DEFS := -DBOOST_ALL_NO_LIB -DBOOST_ERROR_CODE_HEADER_ONLY -DLIBREVENGE_BUILD -DLIBREVENGE_STREAM_BUILD \
+            -I$(LIBCDR)/inc -I$(LIBREVENGE)/inc -I$(LCMS)/include -I$(BOOST) -I$(LUNA)/plutovg/include
+CDR_STAMP = $(wildcard $(LIBCDR)/.stamp-* $(LIBREVENGE)/.stamp-* $(LCMS)/.version-*)
+define cdr_lib
+	@rm -rf $(@D)/cdrobj && mkdir -p $(@D)/cdrobj
+	@echo "compiling libcdr + librevenge + lcms2 into $@"
+	@printf '%s\n' $(CDR_C) | xargs -n1 -P$(JOBS) sh -c '$(CC) $(1) -O2 -w -I$(LCMS)/include -c "$$0" -o $(@D)/cdrobj/$$(basename "$$0").o'
+	@printf '%s\n' $(CDR_CXX) | xargs -n1 -P$(JOBS) sh -c '$(CXX) -std=c++17 $(1) -O2 -w $(CDR_DEFS) -c "$$0" -o $(@D)/cdrobj/$$(basename "$$0").o'
+	@rm -f $@ && ar rcs $@ $(@D)/cdrobj/*.o
+endef
+build/libnitrocdr.a: src/nitrocdr.cpp src/nitrocdr.h $(CDR_STAMP)
+	$(call cdr_lib,$(CPUFLAGS))
+
 # rebuild the viewer when the optional parts change
-CONFIG := tj$(TURBOJPEG)-wuffs$(WUFFS)-svg$(SVG)
+CONFIG := tj$(TURBOJPEG)-wuffs$(WUFFS)-svg$(SVG)-cdr$(CDR)
 build/.config-$(CONFIG):
 	@mkdir -p build
 	@rm -f build/.config-* nitroview
@@ -241,7 +275,7 @@ build/shaders.inc: src/shaders.metal
 nitroview: src/nitroview.m build/shaders.inc build/nitrojpeg.o build/nitropng.o build/nitropsd.o $(VIEWER_OBJS) build/.config-$(CONFIG) Makefile
 	$(CC) $(CFLAGS) $(VIEWER_DEFS) -Ibuild -fobjc-arc src/nitroview.m build/nitrojpeg.o build/nitropng.o build/nitropsd.o $(VIEWER_OBJS) $(VIEWER_LIBS) \
 	  $(FRAMEWORKS) -framework ImageIO -o $@
-	@echo "built nitroview (libjpeg-turbo fallback: $(if $(filter 1,$(TURBOJPEG)),yes,no), Wuffs PNG: $(if $(filter 1,$(WUFFS)),yes,no), SVG: $(if $(filter 1,$(SVG)),yes,no), ImageIO: always)"
+	@echo "built nitroview (libjpeg-turbo fallback: $(if $(filter 1,$(TURBOJPEG)),yes,no), Wuffs PNG: $(if $(filter 1,$(WUFFS)),yes,no), SVG: $(if $(filter 1,$(SVG)),yes,no), CDR: $(if $(filter 1,$(CDR)),yes,no), ImageIO: always)"
 
 # Dock / Finder icon: every iconset size scaled from packaging/icon.png
 build/nitroview.icns: packaging/icon.png
@@ -267,12 +301,15 @@ build/app-%/png_wuffs.o: src/png_wuffs.c src/png_wuffs.h
 	$(CC) -arch $* $(MAC_MIN) -O3 $(APPCPU_$*) -w -c $< -o $@
 build/app-%/libnitrosvg.a: src/nitrosvg.cpp src/nitrosvg.h $(SVG_STAMP)
 	$(call svg_lib,-arch $* $(MAC_MIN) $(APPCPU_$*))
+build/app-%/libnitrocdr.a: src/nitrocdr.cpp src/nitrocdr.h $(CDR_STAMP)
+	$(call cdr_lib,-arch $* $(MAC_MIN) $(APPCPU_$*))
 build/app-%/nitroview: src/nitroview.m build/shaders.inc $(DEC_SRC) $(DEC_HDR) $(if $(filter 1,$(WUFFS)),build/app-%/png_wuffs.o) \
-                       $(if $(filter 1,$(SVG)),build/app-%/libnitrosvg.a) build/.config-$(CONFIG) Makefile
+                       $(if $(filter 1,$(SVG)),build/app-%/libnitrosvg.a) $(if $(filter 1,$(CDR)),build/app-%/libnitrocdr.a) \
+                       build/.config-$(CONFIG) Makefile
 	@mkdir -p $(@D)
 	$(CC) -arch $* $(MAC_MIN) -O3 $(APPCPU_$*) -Wall -Wextra -Wno-unused-parameter -Ibuild \
-	  $(if $(call ljt_has,$*),-DNV_TURBOJPEG -I$(LJT)/include) $(if $(filter 1,$(WUFFS)),-DNV_WUFFS) $(if $(filter 1,$(SVG)),-DNV_SVG) \
-	  -fobjc-arc src/nitroview.m $(DEC_SRC) $(if $(filter 1,$(WUFFS)),$(@D)/png_wuffs.o) $(if $(filter 1,$(SVG)),$(@D)/libnitrosvg.a -lc++) \
+	  $(if $(call ljt_has,$*),-DNV_TURBOJPEG -I$(LJT)/include) $(if $(filter 1,$(WUFFS)),-DNV_WUFFS) $(if $(filter 1,$(SVG)),-DNV_SVG) $(if $(filter 1,$(CDR)),-DNV_CDR) \
+	  -fobjc-arc src/nitroview.m $(DEC_SRC) $(if $(filter 1,$(WUFFS)),$(@D)/png_wuffs.o) $(if $(filter 1,$(CDR)),$(@D)/libnitrocdr.a -liconv -lz) $(if $(filter 1,$(SVG)),$(@D)/libnitrosvg.a -lc++) \
 	  $(if $(call ljt_has,$*),$(LJT)/lib/libturbojpeg.a -Wl$(COMMA)-w) $(FRAMEWORKS) -framework ImageIO -o $@
 build/nitroview-universal: $(foreach a,$(MAC_ARCHS),build/app-$(a)/nitroview)
 	lipo -create $^ -output $@

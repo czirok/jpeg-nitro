@@ -1,0 +1,40 @@
+librevenge addition for nitrocdr (scripts/get-deps.sh applies this after downloading):
+- RVNGProperty::getBinaryData(): the data of a binary property (embedded images) without
+  converting it to base64 and back
+
+--- a/inc/librevenge/RVNGProperty.h
++++ b/inc/librevenge/RVNGProperty.h
+@@ -27,6 +27,8 @@
+ namespace librevenge
+ {
+ 
++class RVNGBinaryData;
++
+ enum RVNGUnit { RVNG_INCH, RVNG_PERCENT, RVNG_POINT, RVNG_TWIP, RVNG_GENERIC, RVNG_UNIT_ERROR };
+ 
+ class REVENGE_API RVNGProperty
+@@ -38,6 +40,11 @@
+ 	/** returns the property unit when possible. If not, returns RVNG_UNIT_ERROR */
+ 	virtual RVNGUnit getUnit() const = 0;
+ 	virtual RVNGString getStr() const = 0;
++	/** The data of a binary property without converting it to base64 (nullptr for other properties). */
++	virtual const RVNGBinaryData *getBinaryData() const
++	{
++		return nullptr;
++	}
+ 	virtual RVNGProperty *clone() const = 0;
+ };
+ 
+--- a/src/lib/RVNGProperty.cpp
++++ b/src/lib/RVNGProperty.cpp
+@@ -102,6 +102,10 @@
+ 		return RVNG_UNIT_ERROR;
+ 	}
+ 	virtual RVNGString getStr() const;
++	virtual const RVNGBinaryData *getBinaryData() const
++	{
++		return &m_data;
++	}
+ 	virtual RVNGProperty *clone() const;
+ 
+ private:
