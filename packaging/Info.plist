@@ -31,6 +31,7 @@
                 <string>org.webmproject.webp</string>
                 <string>com.compuserve.gif</string>
                 <string>com.microsoft.bmp</string>
+                <string>com.canon.cr2-raw-image</string>
                 <string>public.svg-image</string>
                 <string>com.corel.cdr</string>
                 <string>com.corel.cmx</string>

@@ -396,6 +396,47 @@ static int parse(const uint8_t *d, size_t len, Jpeg *j) {
     }
 }
 
+// One value (SHORT or LONG) of a TIFF directory entry, 0 if the tag is missing.
+static uint32_t tiff_tag(const uint8_t *d, size_t len, int le, uint32_t ifd, unsigned want) {
+    #define T16(p) (le ? (unsigned)(p)[0] | (unsigned)(p)[1] << 8 : (unsigned)(p)[0] << 8 | (p)[1])
+    if (ifd < 8 || ifd > len - 2) return 0;
+    unsigned n = T16(d + ifd);
+    if (n > (len - ifd - 2) / 12) return 0;
+    for (unsigned i = 0; i < n; i++) {
+        const uint8_t *e = d + ifd + 2 + 12 * i;
+        if (T16(e) != want) continue;
+        unsigned type = T16(e + 2);
+        if (type == 3) return T16(e + 8);
+        return le ? T16(e + 8) | (uint32_t)T16(e + 10) << 16 : (uint32_t)T16(e + 8) << 16 | T16(e + 10);
+    }
+    return 0;
+    #undef T16
+}
+
+int nj_find_embedded(const uint8_t *data, size_t len, size_t *offset, size_t *size, int *orientation, int *adobe_rgb) {
+    // TIFF header ("II*\0" or "MM\0*") + "CR": a Canon CR2
+    if (len < 16 || !(data[0] == data[1] && (data[0] == 'I' || data[0] == 'M')) || data[8] != 'C' || data[9] != 'R')
+        return -1;
+    int le = data[0] == 'I';
+    uint32_t ifd0 = le ? data[4] | data[5] << 8 | (uint32_t)data[6] << 16 | (uint32_t)data[7] << 24
+                       : (uint32_t)data[4] << 24 | (uint32_t)data[5] << 16 | data[6] << 8 | data[7];
+    uint32_t off = tiff_tag(data, len, le, ifd0, 0x111);   // StripOffsets: the JPEG
+    uint32_t cnt = tiff_tag(data, len, le, ifd0, 0x117);   // StripByteCounts
+    uint32_t orient = tiff_tag(data, len, le, ifd0, 0x112);
+    if (!off || cnt < 4 || off > len - 2 || data[off] != 0xFF || data[off + 1] != 0xD8) return -1;
+    // colour space: Canon's own setting (maker note tag 0xB4: 1 sRGB, 2 Adobe RGB), else the EXIF
+    // ColorSpace (0xFFFF "uncalibrated": what cameras write for Adobe RGB)
+    uint32_t exif = tiff_tag(data, len, le, ifd0, 0x8769);
+    uint32_t note = exif ? tiff_tag(data, len, le, exif, 0x927C) : 0;
+    uint32_t canon = note ? tiff_tag(data, len, le, note, 0xB4) : 0;
+    uint32_t cs = exif ? tiff_tag(data, len, le, exif, 0xA001) : 0;
+    *offset = off;
+    *size = cnt;
+    *orientation = orient >= 1 && orient <= 8 ? (int)orient : 1;
+    *adobe_rgb = canon ? canon == 2 : cs == 0xFFFF;
+    return 0;
+}
+
 int nj_read_info(const uint8_t *data, size_t len, nj_info *info) {
     Jpeg *j = malloc(sizeof *j);
     int rc = parse(data, len, j);

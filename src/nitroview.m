@@ -288,6 +288,12 @@ static id srgb_space(void) {
     if (!cs) cs = CFBridgingRelease(CGColorSpaceCreateWithName(kCGColorSpaceSRGB));
     return cs;
 }
+static id adobe_rgb_space(void) {   // Canon CR2 previews shot in Adobe RGB (no ICC profile in them)
+    static id cs;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ cs = CFBridgingRelease(CGColorSpaceCreateWithName(kCGColorSpaceAdobeRGB1998)); });
+    return cs;
+}
 
 // A JPEG's header segments up to and including SOS, without Extended XMP (some phones
 // store megabytes in it: ImageIO parses it all, ~50 ms) and without the image data.
@@ -518,6 +524,13 @@ static Decoded *decode_file(NSString *path, BufferPool *pool, size_t align) {
     }
     if (!data) data = read_file(path);
     if (!data) return nil;
+    size_t eoff, esize;
+    int raw_orientation = 0, adobe_rgb = 0;   // a Canon CR2 shows its full-size JPEG (nitrojpeg finds it)
+    if (!nj_find_embedded(data.bytes, data.length, &eoff, &esize, &raw_orientation, &adobe_rgb) &&
+        esize <= data.length - eoff)
+        data = [data subdataWithRange:NSMakeRange(eoff, esize)];
+    else
+        raw_orientation = adobe_rgb = 0;
     double t1 = now_ms();
     Decoded *d = [Decoded new];
     d.read_ms = t1 - t0;
@@ -529,7 +542,7 @@ static Decoded *decode_file(NSString *path, BufferPool *pool, size_t align) {
 #ifdef NV_CDR
     if ([ext isEqualToString:@"cdr"] || [ext isEqualToString:@"cmx"]) return decode_cdr(data, d, pool, align, t1);
 #endif
-    d.colorSpace = image_colorspace(data);   // tags the display layer (ICC profile or sRGB)
+    d.colorSpace = adobe_rgb ? adobe_rgb_space() : image_colorspace(data);   // tags the display layer (ICC profile or sRGB)
     if (is_png(bytes, len)) {
         // nitropng (parallel): 8-bit gray / gray+alpha / RGB / RGBA, non-interlaced
         np_info pi;
@@ -598,7 +611,7 @@ static Decoded *decode_file(NSString *path, BufferPool *pool, size_t align) {
     }
     nj_info fi;
     int ok = !nj_read_info(bytes, len, &fi);
-    d.orientation = ok ? fi.orientation : 1;
+    d.orientation = raw_orientation ? raw_orientation : ok ? fi.orientation : 1;
     if (ok && fi.supported && fi.width <= MAX_TEX && fi.height <= MAX_TEX) {
         size_t total = 0;
         for (int c = 0; c < fi.ncomp; c++) {
@@ -1831,7 +1844,7 @@ static NSArray<NSString *> *collect_files(NSArray<NSString *> *args) {
             NSString *ext = f.pathExtension.lowercaseString;
             static NSSet *exts;
             if (!exts) exts = [NSSet setWithArray:@[@"jpg", @"jpeg", @"jpe", @"png", @"heic", @"heif", @"tif", @"tiff",
-                                                    @"webp", @"gif", @"bmp", @"psd", @"psb",
+                                                    @"webp", @"gif", @"bmp", @"psd", @"psb", @"cr2",
 #ifdef NV_SVG
                                                     @"svg",
 #endif
@@ -2152,7 +2165,12 @@ static BOOL header_size(NSString *path, double *w, double *h) {
     size_t n = fread(buf, 1, cap, f);
     fclose(f);
     nj_info fi;
-    int ok = !nj_read_info(buf, n, &fi) && fi.width > 0 && fi.height > 0;
+    size_t eoff, esize;
+    int raw_orientation = 0, adobe_rgb;   // Canon CR2: the header of its JPEG
+    int raw = !nj_find_embedded(buf, n, &eoff, &esize, &raw_orientation, &adobe_rgb);
+    int ok = raw ? !nj_read_info(buf + eoff, n - eoff, &fi) && fi.width > 0 && fi.height > 0
+                 : !nj_read_info(buf, n, &fi) && fi.width > 0 && fi.height > 0;
+    if (raw && ok) fi.orientation = raw_orientation;
     free(buf);
     if (!ok && n == cap) {   // unusually large header: try the whole file
         NSData *all = read_file(path);

@@ -55,6 +55,15 @@ typedef struct {
 // Parses the headers. Returns 0 if the file is a JPEG we could read at all.
 int nj_read_info(const uint8_t *data, size_t len, nj_info *info);
 
+// Canon CR2 raw files: the full-size JPEG the camera stored beside the raw data
+// (the first image of the file's TIFF structure, before the raw data). Returns
+// 0 and its byte range, the EXIF orientation (1..8) and whether it is in Adobe
+// RGB (the camera's colour space setting) if there is one; the JPEG itself has
+// no EXIF or ICC profile, so these come from here. data may be just the start
+// of the file (for the header): the range can then run past len.
+int nj_find_embedded(const uint8_t *data, size_t len, size_t *offset, size_t *size, int *orientation,
+                     int *adobe_rgb);
+
 // Decodes into planar Y/Cb/Cr (no upsampling, no colour conversion: meant
 // for a GPU shader). planes[c] must hold plane_h[c] rows of pitch[c] bytes,
 // pitch[c] >= plane_w[c]. nthreads <= 0 means all CPUs. Returns 0 on success.

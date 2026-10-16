@@ -28,7 +28,10 @@ Az idők Intel i9-en mérve. A dekóderek ARM-on (NEON) is gyorsak: egy 2020-as 
 Airen egy 24 MP-es JPEG ~30 ms alatt dekódolódik, ~3×-osan gyorsabban, mint ugyanazon a gépen az
 Apple hardveres JPEG-dekódere (lásd lent: „Apple Silicon (M1)”). A dekóderek függőség nélküli
 C-fájlok, önállóan is használhatók. A fotósorozatok (pl.
-timelapse) teljes felbontásban, valós időben „lejátszhatók”, akár 60 kép/s-mal. A HEIC, TIFF,
+timelapse) teljes felbontásban, valós időben „lejátszhatók”, akár 60 kép/s-mal. macOS-en a **Canon
+CR2** raw fájlokból a gép által beléjük tett teljes méretű JPEG jelenik meg (a nitrojpeggel, néhány
+ms alatt az ImageIO 150–400 ms-a helyett; az elforgatásukat és az Adobe RGB beállításukat is
+figyelembe veszi). A HEIC, TIFF,
 WebP, GIF és BMP macOS-en az Apple ImageIO-val, Windowson a WIC-kel, Linuxon a GTK betöltőivel nyílik
 meg (lásd lent: „Windows” és „GNOME / Linux”). macOS-en és Windowson vektoros rajzokat is mutat: **SVG**-t
 (lunasvg) és **CorelDRAW** CDR / CMX fájlokat (libcdr, a saját, sok javítást tartalmazó forkunk),
