@@ -127,7 +127,7 @@ nyújtását, a félkövér és dőlt stílusát, a pontos méretét és az impo
 eltolásokat, és a valódi kezdőpontjára kerül; a `CMYK100` színek (CorelDRAW 2022)
 nem fehérek; a rejtett rétegek elemei kimaradnak (egy importált PDF a kikapcsolt rétegeit rejtett
 rétegként tartja meg); a szimbólumdefiníciók nem adnak egy plusz oldalt; a bitképek megtartják az
-átlátszó hátterüket; a CorelDRAW 5 és 7–X5 fájlok elveszett szövegei megjelennek; és az ICU helyett
+átlátszó hátterüket, és a saját körvonalukra vágva jelennek meg (az importált tervek falsraffozása); a CorelDRAW 5 és 7–X5 fájlok elveszett szövegei megjelennek; és az ICU helyett
 iconv dolgozik (kódlapok; karakterkészlet nélkül windows-1250, ha a szövegben ő/ű van). A
 `patches/librevenge.patch` a beágyazott képeket base64 nélkül engedi át. A vonalak legalább egy
 képpont szélesek, mint a CorelDRAW-ban. Amit nem tud: nyílhegyek, a Corel saját vektoros és

@@ -274,6 +274,11 @@ public:
     void drawPath(const RVNGPropertyList &p) override {
         const RVNGPropertyListVector *d = p.child("svg:d");
         if (!d || !d->count()) return;
+        addPath(buildPath(*d));
+    }
+    // a librevenge path (svg:d)
+    static plutovg_path_t *buildPath(const RVNGPropertyListVector &dv) {
+        const RVNGPropertyListVector *d = &dv;
         plutovg_path_t *path = plutovg_path_create();
         for (unsigned long i = 0; i < d->count(); i++) {
             const RVNGPropertyList &e = (*d)[i];
@@ -299,7 +304,7 @@ public:
             default: break;
             }
         }
-        addPath(path);
+        return path;
     }
     void drawGraphicObject(const RVNGPropertyList &p) override {
         if (!m_inPage || m_inMaster) return;
@@ -318,6 +323,18 @@ public:
         it.mirrorY = p["draw:mirror-vertical"] && p["draw:mirror-vertical"]->getInt();
         float cx = it.x + it.w / 2, cy = it.y + it.h / 2;
         rotatedBox(it, cx, cy, it.x, it.y, it.x + it.w, it.y + it.h, it.rotate);
+        // the bitmap's outline (libcdr:clip-path): it shows only inside (cropped bitmaps, the
+        // pattern tiles of imported PDF plans); the clip, in page coordinates, goes in it.path
+        if (const RVNGPropertyListVector *clip = p.child("libcdr:clip-path")) {
+            it.path.reset(buildPath(*clip));
+            plutovg_rect_t r;
+            plutovg_path_extents(it.path.get(), &r, false);
+            it.bx0 = std::max(it.bx0, r.x);
+            it.by0 = std::max(it.by0, r.y);
+            it.bx1 = std::min(it.bx1, r.x + r.w);
+            it.by1 = std::min(it.by1, r.y + r.h);
+            if (it.bx1 <= it.bx0 || it.by1 <= it.by0) return;   // (nothing of it shows)
+        }
         add(std::move(it));
     }
     void drawConnector(const RVNGPropertyList &) override {}
@@ -669,6 +686,7 @@ void drawItem(plutovg_canvas_t *c, const Item &it, float scale) {
             plutovg_canvas_stroke_path(c, it.path.get());
         }
     } else if (it.kind == Item::IMAGE) {
+        if (it.path) plutovg_canvas_clip_path(c, it.path.get());   // (before the image's own transform)
         int iw = plutovg_surface_get_width(it.img->s), ih = plutovg_surface_get_height(it.img->s);
         float cx = it.x + it.w / 2, cy = it.y + it.h / 2;
         plutovg_canvas_translate(c, cx, cy);

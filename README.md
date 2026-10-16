@@ -172,7 +172,7 @@ pages of a multi-page document). libcdr comes from our fork,
 each: open paths are not filled; text keeps its rotation, its horizontal stretch, bold and italic, its
 exact size and the shifts that place the words of imported PDF text, and is placed at its real origin; `CMYK100` colours (CorelDRAW 2022) are not white; objects on hidden layers
 are skipped (an imported PDF keeps its switched-off layers as hidden layers); symbol definitions do
-not make an extra page; bitmaps keep their transparent background; texts lost in CorelDRAW 5 and 7–X5
+not make an extra page; bitmaps keep their transparent background and are cut to their own outline (the wall hatch of imported plans); texts lost in CorelDRAW 5 and 7–X5
 files show; and ICU is replaced by iconv (code pages; without a charset, windows-1250 when the text
 has ő/ű). `patches/librevenge.patch` lets embedded images through without base64. Lines are never
 thinner than one device pixel, as in CorelDRAW. Not supported: arrowheads, Corel's own vector and
