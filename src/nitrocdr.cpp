@@ -112,6 +112,8 @@ struct Span {
     Color color;
     std::string text;
     float width = 0;
+    std::string font;           // the font asked for (and its style), for characters its face lacks
+    bool bold = false, italic = false;
 };
 struct Line {
     int align = 0;   // 0 left, 1 center, 2 right
@@ -201,7 +203,7 @@ static const char *substitute(const std::string &family) {
 // CorelDRAW font names: "Arial", "Arial CE" (Central European variants of old fonts),
 // "Times New Roman Bold", "Futura Lt BT" ... -> a face of the system fonts, falling back to
 // Arial / Helvetica.
-plutovg_font_face_t *find_font(const std::string &name, bool bold, bool italic) {
+plutovg_font_face_t *find_font(const std::string &name, bool bold, bool italic, std::string *familyOut = nullptr) {
     plutovg_font_face_cache_t *cache = font_cache();
     std::string family = name;
     int weight = bold ? 700 : 400;
@@ -218,6 +220,7 @@ plutovg_font_face_t *find_font(const std::string &name, bool bold, bool italic) 
         for (const char *sfx : italics)
             if (ends_with(family, sfx)) { family.resize(family.size() - strlen(sfx)); italic = changed = true; }
     }
+    if (familyOut) *familyOut = family;
     const char *sub = substitute(family);
     // a Bitstream font also under Linotype's name of the family ("Futura Lt BT": "Futura LT" Light)
     std::string linotype = bitstream ? family + " LT" : family;
@@ -232,6 +235,28 @@ plutovg_font_face_t *find_font(const std::string &name, bool bold, bool italic) 
         if (f) return f;
     }
     return nullptr;   // (a family without that style gives its closest face)
+}
+
+// A face for a character the font lacks (old Western fonts such as AvantGarde Bk BT have no ő / ű:
+// their "missing glyph" box showed): the family's substitute, then common fonts; null if none has it.
+plutovg_font_face_t *fallback_font(const std::string &name, bool bold, bool italic, plutovg_codepoint_t cp) {
+    std::string family;
+    find_font(name, bold, italic, &family);
+    const char *sub = substitute(family);
+    const char *tries[] = {sub ? sub : "Arial", "Arial", "Helvetica", "Lucida Grande", "Arial Unicode MS"};
+    for (const char *t : tries) {
+        plutovg_font_face_t *f = find_font(t, bold, italic);
+        if (f && plutovg_font_face_has_glyph(f, cp)) return f;
+    }
+    return nullptr;
+}
+
+static plutovg_codepoint_t utf8_next(const std::string &s, size_t &i) {   // (invalid bytes: as Latin-1)
+    unsigned char c = (unsigned char)s[i++];
+    int n = c >= 0xf0 ? 3 : c >= 0xe0 ? 2 : c >= 0xc0 ? 1 : 0;
+    plutovg_codepoint_t cp = n ? c & (0x3f >> n) : c;
+    for (; n && i < s.size() && ((unsigned char)s[i] & 0xc0) == 0x80; n--) cp = (cp << 6) | ((unsigned char)s[i++] & 0x3f);
+    return cp;
 }
 
 // --- the painter -------------------------------------------------------------
@@ -430,8 +455,11 @@ public:
         m_span.shiftY = (float)number(p["libcdr:shift-y"]);
         m_span.color = color(p["fo:color"]);
         std::string font = p["style:font-name"] ? p["style:font-name"]->getStr().cstr() : "Arial";
+        m_span.font = font;
+        m_span.bold = is(p, "fo:font-weight", "bold");
+        m_span.italic = is(p, "fo:font-style", "italic");
         std::lock_guard<std::mutex> g(g_lock);
-        m_span.face = find_font(font, is(p, "fo:font-weight", "bold"), is(p, "fo:font-style", "italic"));
+        m_span.face = find_font(font, m_span.bold, m_span.italic);
     }
     void closeSpan() override {}
     void openLink(const RVNGPropertyList &) override {}
@@ -536,10 +564,32 @@ private:
         m_text->lines.back().emptyFace = m_span.face;
         m_text->lines.back().emptySize = m_span.size;
     }
+    // the text in spans of one face each: characters the span's font lacks come from a fallback font
     void appendText(const std::string &s) {
         if (m_text->lines.empty()) newLine();
+        std::lock_guard<std::mutex> g(g_lock);
+        size_t start = 0;
+        plutovg_font_face_t *runFace = m_span.face;
+        for (size_t i = 0; i < s.size();) {
+            size_t at = i;
+            plutovg_codepoint_t cp = utf8_next(s, i);
+            plutovg_font_face_t *f = m_span.face;
+            if (f && cp > 0x20 && !plutovg_font_face_has_glyph(f, cp)) {
+                plutovg_font_face_t *fb = fallback_font(m_span.font, m_span.bold, m_span.italic, cp);
+                if (fb) f = fb;
+            }
+            if (f != runFace) {
+                if (at > start) pushSpan(s.substr(start, at - start), runFace);
+                start = at;
+                runFace = f;
+            }
+        }
+        if (s.size() > start) pushSpan(s.substr(start), runFace);
+    }
+    void pushSpan(const std::string &text, plutovg_font_face_t *face) {
         Span sp = m_span;
-        sp.text = s;
+        sp.text = text;
+        sp.face = face;
         m_text->lines.back().spans.push_back(std::move(sp));
     }
 

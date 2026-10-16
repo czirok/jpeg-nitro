@@ -14,6 +14,8 @@ lunasvg / plutovg fixes for nitroview (scripts/get-deps.sh applies this after do
   skips a family with only italic faces for upright text)
 - plutovg_font_face_cache_get_weight(): a face by weight (OS/2 usWeightClass) instead of a bold
   flag (nitrocdr: "Futura Lt BT" -> Futura LT Light, not Book or Heavy)
+- plutovg_font_face_has_glyph(): whether a face has a character (nitrocdr takes the ones an
+  old Western font lacks, such as ő / ű, from a fallback font)
 
 --- a/plutovg/source/plutovg-path.c
 +++ b/plutovg/source/plutovg-path.c
@@ -54,7 +56,19 @@ lunasvg / plutovg fixes for nitroview (scripts/get-deps.sh applies this after do
  
 --- a/plutovg/source/plutovg-font.c
 +++ b/plutovg/source/plutovg-font.c
-@@ -513,6 +513,8 @@
+@@ -365,6 +365,11 @@
+     return plutovg_glyph_cache_get(&face->cache, face, codepoint);
+ }
+ 
++bool plutovg_font_face_has_glyph(plutovg_font_face_t* face, plutovg_codepoint_t codepoint)
++{
++    return stbtt_FindGlyphIndex(&face->info, codepoint) != 0;
++}
++
+ void plutovg_font_face_get_glyph_metrics(plutovg_font_face_t* face, float size, plutovg_codepoint_t codepoint, float* advance_width, float* left_side_bearing, plutovg_rect_t* extents)
+ {
+     float scale = plutovg_font_face_get_scale(face, size);
+@@ -513,6 +518,8 @@
      int ttcindex;
      bool bold;
      bool italic;
@@ -63,7 +77,7 @@ lunasvg / plutovg fixes for nitroview (scripts/get-deps.sh applies this after do
      struct plutovg_font_face_entry* next;
  } plutovg_font_face_entry_t;
  
-@@ -619,6 +621,8 @@
+@@ -619,6 +626,8 @@
      entry->ttcindex = 0;
      entry->bold = bold;
      entry->italic = italic;
@@ -72,7 +86,7 @@ lunasvg / plutovg fixes for nitroview (scripts/get-deps.sh applies this after do
  
      plutovg_font_face_cache_add_entry(cache, entry);
  }
-@@ -635,8 +639,8 @@
+@@ -635,8 +644,8 @@
  
  static plutovg_font_face_entry_t* plutovg_font_face_entry_select(plutovg_font_face_entry_t* a, plutovg_font_face_entry_t* b, bool bold, bool italic)
  {
@@ -83,14 +97,10 @@ lunasvg / plutovg fixes for nitroview (scripts/get-deps.sh applies this after do
      return a_score > b_score ? a : b;
  }
  
-@@ -682,8 +686,56 @@
-         face = selected->face;
-     }
+@@ -686,6 +695,54 @@
+     return face;
+ }
  
-+    plutovg_mutex_unlock(&cache->mutex);
-+    return face;
-+}
-+
 +plutovg_font_face_t* plutovg_font_face_cache_get_weight(plutovg_font_face_cache_t* cache, const char* family, int weight, bool italic)
 +{
 +    plutovg_font_face_entry_t* best = NULL;
@@ -119,8 +129,8 @@ lunasvg / plutovg fixes for nitroview (scripts/get-deps.sh applies this after do
 +            best->face = plutovg_font_face_load_from_file(best->filename, best->ttcindex);
 +        face = best->face;
 +    }
-     plutovg_mutex_unlock(&cache->mutex);
-     return face;
++    plutovg_mutex_unlock(&cache->mutex);
++    return face;
 +}
 +
 +bool plutovg_font_face_cache_has_style(plutovg_font_face_cache_t* cache, const char* family, bool italic)
@@ -137,10 +147,12 @@ lunasvg / plutovg fixes for nitroview (scripts/get-deps.sh applies this after do
 +    }
 +    plutovg_mutex_unlock(&cache->mutex);
 +    return found;
- }
- 
++}
++
  #ifndef PLUTOVG_DISABLE_FONT_FACE_CACHE_LOAD
-@@ -935,6 +987,10 @@
+ 
+ #include <ctype.h>
+@@ -935,6 +992,10 @@
              entry->italic = true;
          }
  
@@ -151,7 +163,7 @@ lunasvg / plutovg fixes for nitroview (scripts/get-deps.sh applies this after do
          plutovg_font_face_cache_add_entry(cache, entry);
          num_faces++;
      }
-@@ -1038,6 +1094,12 @@
+@@ -1038,6 +1099,12 @@
  #elif defined(__APPLE__)
      num_faces += plutovg_font_face_cache_load_dir(cache, "/Library/Fonts");
      num_faces += plutovg_font_face_cache_load_dir(cache, "/System/Library/Fonts");
@@ -166,18 +178,32 @@ lunasvg / plutovg fixes for nitroview (scripts/get-deps.sh applies this after do
      num_faces += plutovg_font_face_cache_load_dir(cache, "/usr/local/share/fonts");
 --- a/plutovg/include/plutovg.h
 +++ b/plutovg/include/plutovg.h
-@@ -971,6 +971,21 @@
- PLUTOVG_API plutovg_font_face_t* plutovg_font_face_cache_get(plutovg_font_face_cache_t* cache, const char* family, bool bold, bool italic);
+@@ -852,6 +852,11 @@
+  * @param extents Pointer to a `plutovg_rect_t` object to store the glyph bounding box.
+  */
+ PLUTOVG_API void plutovg_font_face_get_glyph_metrics(plutovg_font_face_t* face, float size, plutovg_codepoint_t codepoint, float* advance_width, float* left_side_bearing, plutovg_rect_t* extents);
++
++/**
++ * @brief Tells whether the font face has a glyph for the codepoint (else its "missing glyph" box is drawn).
++ */
++PLUTOVG_API bool plutovg_font_face_has_glyph(plutovg_font_face_t* face, plutovg_codepoint_t codepoint);
  
  /**
+  * @brief Retrieves the path of a glyph and its advance width.
+@@ -969,8 +974,23 @@
+  * @return A pointer to the matching `plutovg_font_face_t` object, or NULL if not found. The returned face is owned by the cache and must not be destroyed by the caller.
+  */
+ PLUTOVG_API plutovg_font_face_t* plutovg_font_face_cache_get(plutovg_font_face_cache_t* cache, const char* family, bool bold, bool italic);
++
++/**
 + * @brief Tells whether the cache has a face of the family with the given italic flag.
 + *
 + * plutovg_font_face_cache_get() returns the closest face of a family, an italic one for upright
 + * text when the family has only that; this lets the caller try another family instead.
 + */
 +PLUTOVG_API bool plutovg_font_face_cache_has_style(plutovg_font_face_cache_t* cache, const char* family, bool italic);
-+
-+/**
+ 
+ /**
 + * @brief Like plutovg_font_face_cache_get(), with a weight (100..900, OS/2 usWeightClass: 400 regular,
 + * 700 bold) instead of a bold flag: of the faces with the right italic flag (and normal width),
 + * the one of the closest weight (a light weight prefers the lighter one of two equally close).
