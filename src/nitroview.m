@@ -31,6 +31,7 @@
 #include "nitrojpeg.h"
 #include "nitropng.h"
 #include "nitropsd.h"
+#include "nitroheic.h"
 #ifdef NV_WUFFS
 #include "png_wuffs.h"   // optional fast PNG decoder
 #endif
@@ -237,7 +238,8 @@ done:
 }
 
 // Decode one file into a Metal buffer. Runs on the decoder thread.
-enum { MODE_TURBOJPEG = -1, MODE_WUFFS = -2, MODE_IMAGEIO = -3, MODE_NITROPNG = -4, MODE_NITROPSD = -5, MODE_SVG = -6, MODE_CDR = -7 };
+enum { MODE_TURBOJPEG = -1, MODE_WUFFS = -2, MODE_IMAGEIO = -3, MODE_NITROPNG = -4, MODE_NITROPSD = -5, MODE_SVG = -6, MODE_CDR = -7,
+       MODE_NITROHEIC = -8 };
 static int g_nthreads = 0;   // -j
 
 static const char *mode_name(int m) {
@@ -250,6 +252,7 @@ static const char *mode_name(int m) {
     case MODE_IMAGEIO: return "imageio";
     case MODE_NITROPNG: return "nitropng";
     case MODE_NITROPSD: return "nitropsd";
+    case MODE_NITROHEIC: return "nitroheic";
     case MODE_SVG: return "svg";
     case MODE_CDR: return "cdr";
     default: return "?";
@@ -535,6 +538,43 @@ static Decoded *decode_file(NSString *path, BufferPool *pool, size_t align) {
 #ifdef NV_CDR
     if ([ext isEqualToString:@"cdr"] || [ext isEqualToString:@"cmx"]) return decode_cdr(data, d, pool, align, t1);
 #endif
+    nh_info hi;   // HEIC (iPhone ...): its tiles decoded in parallel by nitroheic (VideoToolbox)
+    if (!nh_read_info(bytes, len, &hi) && hi.plane_w[0] <= MAX_TEX && hi.plane_h[0] <= MAX_TEX) {
+        size_t total = 0;
+        for (int c = 0; c < 3; c++) {
+            d.pitch[c] = align_up((size_t)hi.plane_w[c], align);
+            d.offset[c] = total;
+            total = align_up(total + d.pitch[c] * hi.plane_h[c], align);
+            d.pw[c] = hi.plane_w[c];
+            d.ph[c] = hi.plane_h[c];
+        }
+        id<MTLBuffer> buf = [pool get:total];
+        if (buf) {
+            uint8_t *base = buf.contents;
+            uint8_t *planes[3] = {base + d.offset[0], base + d.offset[1], base + d.offset[2]};
+            if (!nh_decode_planes(bytes, len, &hi, planes, d.pitch, g_nthreads)) {
+                if (buf.storageMode == MTLStorageModeManaged) [buf didModifyRange:NSMakeRange(0, total)];
+                d.buffer = buf;
+                d.kind = KIND_YUV;   // (full range BT.601 4:2:0, as a JPEG)
+                d.width = hi.width;
+                d.height = hi.height;
+                d.ncomp = 3;
+                d.h0 = 2; d.v0 = 2;
+                d.h1 = 1; d.v1 = 1;
+                d.hmax = 2; d.vmax = 2;
+                d.orientation = hi.orientation;
+                id cs = hi.icc ? CFBridgingRelease(CGColorSpaceCreateWithICCData(
+                                     (__bridge CFDataRef)[NSData dataWithBytes:hi.icc length:hi.icc_len]))
+                               : nil;
+                d.colorSpace = cs ?: srgb_space();
+                d.mode = MODE_NITROHEIC;
+                d.bands = hi.ntiles;
+                d.decode_ms = now_ms() - t1;
+                return d;
+            }
+            [pool put:buf];
+        }
+    }
     d.colorSpace = image_colorspace(data);   // tags the display layer (ICC profile or sRGB)
     if (is_png(bytes, len)) {
         // nitropng (parallel): 8-bit gray / gray+alpha / RGB / RGBA, non-interlaced

@@ -52,7 +52,8 @@ THREADLIBS := -lpthread
 endif
 CFLAGS     := -O3 $(CPUFLAGS) $(PORTFLAGS) -Wall -Wextra -Wno-unused-parameter
 ASAN       := -O1 -g $(PORTFLAGS) -fsanitize=address,undefined -fno-omit-frame-pointer
-FRAMEWORKS := -framework Cocoa -framework Metal -framework MetalKit -framework QuartzCore -framework UniformTypeIdentifiers
+FRAMEWORKS := -framework Cocoa -framework Metal -framework MetalKit -framework QuartzCore -framework UniformTypeIdentifiers \
+              -framework VideoToolbox -framework CoreMedia -framework CoreVideo
 DEC_SRC    := src/nitrojpeg.c src/nitropng.c src/nitropsd.c
 DEC_HDR    := src/nitrojpeg.h src/nitropng.h src/nitropsd.h src/nitro_os.h
 
@@ -144,6 +145,9 @@ build/nitrojpeg_ref.o: src/nitrojpeg.c src/nitrojpeg.h src/nitro_os.h | ljt
 	$(CC) $(REF_CFLAGS) -c $< -o $@
 
 build/nitropsd.o: src/nitropsd.c src/nitropsd.h src/nitropng.h src/nitro_os.h
+	@mkdir -p build
+	$(CC) $(CFLAGS) -c $< -o $@
+build/nitroheic.o: src/nitroheic.c src/nitroheic.h   # (macOS: VideoToolbox)
 	@mkdir -p build
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -287,8 +291,8 @@ build/shaders.inc: src/shaders.metal
 	@mkdir -p build
 	cd src && xxd -i shaders.metal > ../$@
 
-nitroview: src/nitroview.m build/shaders.inc build/nitrojpeg.o build/nitropng.o build/nitropsd.o $(VIEWER_OBJS) build/.config-$(CONFIG) Makefile
-	$(CC) $(CFLAGS) $(VIEWER_DEFS) -Ibuild -fobjc-arc src/nitroview.m build/nitrojpeg.o build/nitropng.o build/nitropsd.o $(VIEWER_OBJS) $(VIEWER_LIBS) \
+nitroview: src/nitroview.m build/shaders.inc build/nitrojpeg.o build/nitropng.o build/nitropsd.o build/nitroheic.o $(VIEWER_OBJS) build/.config-$(CONFIG) Makefile
+	$(CC) $(CFLAGS) $(VIEWER_DEFS) -Ibuild -fobjc-arc src/nitroview.m build/nitrojpeg.o build/nitropng.o build/nitropsd.o build/nitroheic.o $(VIEWER_OBJS) $(VIEWER_LIBS) \
 	  $(FRAMEWORKS) -framework ImageIO -o $@
 	@echo "built nitroview (libjpeg-turbo fallback: $(if $(filter 1,$(TURBOJPEG)),yes,no), Wuffs PNG: $(if $(filter 1,$(WUFFS)),yes,no), SVG: $(if $(filter 1,$(SVG)),yes,no), CDR: $(if $(filter 1,$(CDR)),yes,no), ImageIO: always)"
 
@@ -320,14 +324,14 @@ build/app-%/libnitrocdr.a: src/nitrocdr.cpp src/nitrocdr.h $(CDR_STAMP)
 	$(call cdr_lib,-arch $* $(MAC_MIN) $(APPCPU_$*))
 build/app-%/mimalloc.o: src/nitroalloc.cpp $(wildcard $(MI)/.version-*)
 	$(call mimalloc_objs,-arch $* $(MAC_MIN) $(APPCPU_$*))
-build/app-%/nitroview: src/nitroview.m build/shaders.inc $(DEC_SRC) $(DEC_HDR) $(if $(filter 1,$(WUFFS)),build/app-%/png_wuffs.o) \
+build/app-%/nitroview: src/nitroview.m build/shaders.inc $(DEC_SRC) $(DEC_HDR) src/nitroheic.c src/nitroheic.h $(if $(filter 1,$(WUFFS)),build/app-%/png_wuffs.o) \
                        $(if $(filter 1,$(SVG)),build/app-%/libnitrosvg.a) $(if $(filter 1,$(CDR)),build/app-%/libnitrocdr.a) \
                        $(if $(filter 1,$(MIMALLOC)),build/app-%/mimalloc.o) \
                        build/.config-$(CONFIG) Makefile
 	@mkdir -p $(@D)
 	$(CC) -arch $* $(MAC_MIN) -O3 $(APPCPU_$*) -Wall -Wextra -Wno-unused-parameter -Ibuild \
 	  $(if $(call ljt_has,$*),-DNV_TURBOJPEG -I$(LJT)/include) $(if $(filter 1,$(WUFFS)),-DNV_WUFFS) $(if $(filter 1,$(SVG)),-DNV_SVG) $(if $(filter 1,$(CDR)),-DNV_CDR) \
-	  -fobjc-arc src/nitroview.m $(DEC_SRC) $(if $(filter 1,$(WUFFS)),$(@D)/png_wuffs.o) $(if $(filter 1,$(CDR)),$(@D)/libnitrocdr.a -liconv -lz) $(if $(filter 1,$(SVG)),$(@D)/libnitrosvg.a -lc++) \
+	  -fobjc-arc src/nitroview.m $(DEC_SRC) src/nitroheic.c $(if $(filter 1,$(WUFFS)),$(@D)/png_wuffs.o) $(if $(filter 1,$(CDR)),$(@D)/libnitrocdr.a -liconv -lz) $(if $(filter 1,$(SVG)),$(@D)/libnitrosvg.a -lc++) \
 	  $(if $(filter 1,$(MIMALLOC)),$(@D)/mimalloc.o $(@D)/nitroalloc.o) $(if $(call ljt_has,$*),$(LJT)/lib/libturbojpeg.a -Wl$(COMMA)-w) $(FRAMEWORKS) -framework ImageIO -o $@
 build/nitroview-universal: $(foreach a,$(MAC_ARCHS),build/app-$(a)/nitroview)
 	lipo -create $^ -output $@

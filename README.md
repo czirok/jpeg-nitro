@@ -30,7 +30,10 @@ Times on an Intel i9. The decoders are fast on ARM too (NEON): on a 2020 M1 MacB
 used on their own ([Using the decoders](#using-the-decoders)). Photo series such as timelapses can be "played
 back" at full resolution in real time, up to 60 images/s. On macOS and Windows **Canon CR2** raw files show
 the full-size JPEG the camera stored in them (nitrojpeg, in milliseconds instead of ImageIO's
-150–400 ms; their rotation is honoured). HEIC, TIFF, WebP, GIF and BMP open
+150–400 ms; their rotation is honoured). On macOS **HEIC** photos (iPhone) are decoded by
+nitroheic (`src/nitroheic.c`): an iPhone photo is a grid of 48 independent HEVC tiles, decoded here
+in parallel, one VideoToolbox decoder per core, into Y/Cb/Cr planes converted on the GPU — 12 MP in
+~33 ms instead of ImageIO's ~200 ms on an Intel i9. TIFF, WebP, GIF, BMP and other HEICs open
 through Apple ImageIO on macOS, WIC on Windows and GTK's loaders on Linux (see **Windows** and
 **GNOME / Linux** below). On macOS and Windows it also shows vector drawings, **SVG** (lunasvg) and
 **CorelDRAW** CDR / CMX (libcdr, our fork with many fixes), sharp at any zoom and paging as fast
