@@ -6,7 +6,7 @@
 #   - stb_image.h and wuffs (only for the decoder comparison in bench/bench)
 #   - lunasvg (MIT, with its plutovg): SVG rendering in nitroview
 #   - libcdr (our fork with fixes, github.com/gereoffy/libcdr) + librevenge (MPL-2.0),
-#     lcms2 (MIT) and the boost headers: CorelDRAW
+#     lcms2 (MIT), the boost headers and (for Windows) zlib: CorelDRAW
 #     drawings in nitroview (sources only; the Makefile compiles them)
 # Nothing is installed system-wide.
 set -euo pipefail
@@ -16,9 +16,10 @@ TP=$PWD
 LJT_VER=3.1.2
 NASM_VER=2.16.03
 LUNASVG_COMMIT=90d6ff333862acf3f5551ffbbcb1e45957661881   # 2026-10-15
-LIBCDR_COMMIT=9e10cd5ef7d01043f3c1588515912c12a0055cbd    # 2026-10-16, github.com/gereoffy/libcdr
+LIBCDR_COMMIT=b959fa0633462801024e5af9d293933db9b04e86    # 2026-10-16, github.com/gereoffy/libcdr
 LIBREVENGE_VER=0.0.6
 LCMS2_VER=2.19.1
+ZLIB_VER=1.3.1      # (only for the Windows build: macOS and Linux have it)
 BOOST_VER=1.89.0
 JOBS=$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 8)
 
@@ -66,6 +67,13 @@ if [ ! -f lcms2/.version-$LCMS2_VER ]; then
   tar xf lcms2.tar.gz && rm lcms2.tar.gz
   mv lcms2-$LCMS2_VER lcms2
   touch lcms2/.version-$LCMS2_VER
+fi
+if [ ! -f zlib/.version-$ZLIB_VER ]; then
+  rm -rf zlib zlib-$ZLIB_VER
+  curl -fsSL -o zlib.tar.gz https://github.com/madler/zlib/releases/download/v$ZLIB_VER/zlib-$ZLIB_VER.tar.gz
+  tar xf zlib.tar.gz && rm zlib.tar.gz
+  mv zlib-$ZLIB_VER zlib
+  touch zlib/.version-$ZLIB_VER
 fi
 if [ ! -f boost/.version-$BOOST_VER ]; then
   B=boost_${BOOST_VER//./_}

@@ -28,7 +28,7 @@ Times on an Intel i9. The decoders are fast on ARM too (NEON): on a 2020 M1 MacB
 used on their own ([Using the decoders](#using-the-decoders)). Photo series such as timelapses can be "played
 back" at full resolution in real time, up to 60 images/s. HEIC, TIFF, WebP, GIF and BMP open
 through Apple ImageIO on macOS, WIC on Windows and GTK's loaders on Linux (see **Windows** and
-**GNOME / Linux** below). On macOS it also shows vector drawings, **SVG** (lunasvg) and
+**GNOME / Linux** below). On macOS and Windows it also shows vector drawings, **SVG** (lunasvg) and
 **CorelDRAW** CDR / CMX (libcdr, our fork with many fixes), sharp at any zoom and paging as fast
 as photos (see **SVG** and **CorelDRAW** below); the GNOME viewer shows SVG through GTK.
 (The name: racing cars boost the turbo with nitro.)
@@ -80,7 +80,8 @@ icon or its window, or chosen with nitroview → Open… (⌘O); a running viewe
 **Windows:** `nitroview.exe` ([src/nitroview_win.c](src/nitroview_win.c), Win32 + Direct3D 11) is
 the same viewer: the same keys, mouse, zoom and window behaviour, full screen, slideshow, one file →
 its folder, drag & drop. JPEG / PNG / PSD go through the three decoders and a compute shader,
-everything else (progressive JPEG, HEIC, TIFF, WebP, GIF, BMP) through Windows' own WIC codecs.
+everything else (progressive JPEG, HEIC, TIFF, WebP, GIF, BMP) through Windows' own WIC codecs;
+SVG and CorelDRAW CDR / CMX as on macOS (sharp when zoomed in, [ / ] for the pages of a drawing).
 One self-contained .exe (only system DLLs, Windows 10 or later), built on the Mac or on Linux with
 `make windows` (see [Other systems](#using-the-decoders)). `nitroview.exe --register` offers it for
 all these types in Explorer (current user, no admin rights) and opens Settings → Default apps, where
@@ -145,7 +146,7 @@ Apple ImageIO like the other formats. Transparent images are shown over black. O
 (screenshots, scans, AI images, upscaled textures, Photoshop exports) nitropng averages
 **~43 ms/image** vs ~171 ms for Wuffs and ~318 ms for ImageIO; see [nitropng](#nitropng).
 
-**SVG** (macOS, when `scripts/get-deps.sh` has fetched [lunasvg](https://github.com/sammycage/lunasvg)):
+**SVG** (macOS and Windows, when `scripts/get-deps.sh` has fetched [lunasvg](https://github.com/sammycage/lunasvg)):
 rendered by lunasvg over white, first in full with the long side 1024–4096 pixels (small icons are
 enlarged, huge drawings reduced; fitted to the screen, in full screen or after key 0, at least
 the screen's size, the prefetched images too, so they are sharp right away), so paging, fitting and zooming out work as for photos. Zoomed in
@@ -164,7 +165,7 @@ diagrams), SVG fonts and symbol-only sprite files, which draw nothing. Of 883 SV
 Mac (icons, logos, diagrams, Illustrator exports) 867 open; the 16 others draw nothing in a browser
 either.
 
-**CorelDRAW** (CDR and CMX, macOS, when `scripts/get-deps.sh` has fetched libcdr): libcdr (from
+**CorelDRAW** (CDR and CMX, macOS and Windows, when `scripts/get-deps.sh` has fetched libcdr): libcdr (from
 LibreOffice, used by Inkscape and LibreOffice Draw too) reads the drawing; nitrocdr
 (`src/nitrocdr.cpp`) records what it reports as a display list and draws it with plutovg directly,
 without an SVG step, so embedded scans and photos stay decoded bitmaps in memory. The shown area is

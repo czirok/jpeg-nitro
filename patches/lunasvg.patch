@@ -9,7 +9,8 @@ lunasvg / plutovg fixes for nitroview (scripts/get-deps.sh applies this after do
 - XML comments inside <text> were drawn as text (https://github.com/sammycage/lunasvg/pull/281)
 - the font cache chose condensed or expanded faces as readily as the normal one (macOS Futura:
   Futura Condensed Medium for Futura); with equal bold / italic the normal width wins now
-- macOS: the user's fonts (~/Library/Fonts, where Font Book installs) are loaded too
+- the user's fonts are loaded too: ~/Library/Fonts on macOS (where Font Book installs), and
+  %LOCALAPPDATA%\Microsoft\Windows\Fonts on Windows (Windows 10+ installs there per user)
 - plutovg_font_face_cache_has_style(): whether a family has an upright / italic face (nitrocdr
   skips a family with only italic faces for upright text)
 - plutovg_font_face_cache_get_weight(): a face by weight (OS/2 usWeightClass) instead of a bold
@@ -163,7 +164,16 @@ lunasvg / plutovg fixes for nitroview (scripts/get-deps.sh applies this after do
          plutovg_font_face_cache_add_entry(cache, entry);
          num_faces++;
      }
-@@ -1038,6 +1099,12 @@
+@@ -1035,9 +1096,21 @@
+     int num_faces = 0;
+ #if defined(_WIN32)
+     num_faces += plutovg_font_face_cache_load_dir(cache, "C:\\Windows\\Fonts");
++    const char* local = getenv("LOCALAPPDATA"); // the user's fonts too (Windows 10+ installs them there)
++    if(local) {
++        char path[4096];
++        if(snprintf(path, sizeof(path), "%s\\Microsoft\\Windows\\Fonts", local) < (int)sizeof(path))
++            num_faces += plutovg_font_face_cache_load_dir(cache, path);
++    }
  #elif defined(__APPLE__)
      num_faces += plutovg_font_face_cache_load_dir(cache, "/Library/Fonts");
      num_faces += plutovg_font_face_cache_load_dir(cache, "/System/Library/Fonts");

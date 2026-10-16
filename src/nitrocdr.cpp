@@ -22,6 +22,9 @@
 #include <mutex>
 #include <string>
 #include <vector>
+#ifndef M_PI   // (not defined by mingw's math.h)
+#define M_PI 3.14159265358979323846
+#endif
 
 namespace {
 

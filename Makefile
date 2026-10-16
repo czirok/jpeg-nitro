@@ -231,7 +231,7 @@ define svg_lib
 	@echo "compiling lunasvg + plutovg into $@"
 	@printf '%s\n' $(SVG_C) | xargs -n1 -P$(JOBS) sh -c '$(CC) $(1) -O3 -w $(SVG_DEFS) -c "$$0" -o $(@D)/svgobj/$$(basename "$$0").o'
 	@printf '%s\n' $(SVG_CXX) | xargs -n1 -P$(JOBS) sh -c '$(CXX) -std=c++17 -fno-exceptions -fno-rtti $(1) -O3 -w $(SVG_DEFS) -c "$$0" -o $(@D)/svgobj/$$(basename "$$0").o'
-	@rm -f $@ && ar rcs $@ $(@D)/svgobj/*.o
+	@rm -f $@ && $(AR) rcs $@ $(@D)/svgobj/*.o
 endef
 SVG_STAMP = $(wildcard $(LUNA)/.stamp-*)   # changes with the lunasvg commit / patches/lunasvg.patch
 build/libnitrosvg.a: src/nitrosvg.cpp src/nitrosvg.h $(SVG_STAMP)
@@ -247,7 +247,7 @@ CDR_CXX  = $(wildcard $(LIBCDR)/src/lib/*.cpp) src/nitrocdr.cpp \
              RVNGPropertyListVector.cpp RVNGString.cpp RVNGStringVector.cpp RVNGSVGDrawingGenerator.cpp \
              RVNGStreamImplementation.cpp \
              RVNGDirectoryStream.cpp RVNGOLEStream.cpp RVNGZipStream.cpp)
-CDR_DEFS := -DBOOST_ALL_NO_LIB -DBOOST_ERROR_CODE_HEADER_ONLY -DLIBREVENGE_BUILD -DLIBREVENGE_STREAM_BUILD \
+CDR_DEFS := -DBOOST_ALL_NO_LIB -DBOOST_ERROR_CODE_HEADER_ONLY -DLIBREVENGE_BUILD -DLIBREVENGE_STREAM_BUILD -DPLUTOVG_BUILD_STATIC \
             -I$(LIBCDR)/inc -I$(LIBREVENGE)/inc -I$(LCMS)/include -I$(BOOST) -I$(LUNA)/plutovg/include
 CDR_STAMP = $(wildcard $(LIBCDR)/.stamp-* $(LIBREVENGE)/.stamp-* $(LCMS)/.version-*)
 define cdr_lib
@@ -255,7 +255,7 @@ define cdr_lib
 	@echo "compiling libcdr + librevenge + lcms2 into $@"
 	@printf '%s\n' $(CDR_C) | xargs -n1 -P$(JOBS) sh -c '$(CC) $(1) -O2 -w -I$(LCMS)/include -c "$$0" -o $(@D)/cdrobj/$$(basename "$$0").o'
 	@printf '%s\n' $(CDR_CXX) | xargs -n1 -P$(JOBS) sh -c '$(CXX) -std=c++17 $(1) -O2 -w $(CDR_DEFS) -c "$$0" -o $(@D)/cdrobj/$$(basename "$$0").o'
-	@rm -f $@ && ar rcs $@ $(@D)/cdrobj/*.o
+	@rm -f $@ && $(AR) rcs $@ $(@D)/cdrobj/*.o
 endef
 build/libnitrocdr.a: src/nitrocdr.cpp src/nitrocdr.h $(CDR_STAMP)
 	$(call cdr_lib,$(CPUFLAGS))
@@ -411,10 +411,38 @@ WINLIBS := -ld3d11 -ldxgi -ld3dcompiler -lwindowscodecs -lole32 -loleaut32 -lshl
 build/nitroview_res.o: packaging/nitroview.rc packaging/nitroview.ico
 	@mkdir -p build
 	$(WINRES) -I packaging $< -O coff -o $@
-nitroview.exe: src/nitroview_win.c $(DEC_SRC) $(DEC_HDR) build/nitroview_res.o
-	$(WINCC) $(WINFLAGS) -municode src/nitroview_win.c $(DEC_SRC) build/nitroview_res.o $(WINLIBS) -o $@
+# SVG and CorelDRAW in the Windows viewer too (same sources, cross-compiled into build/win/;
+# zlib, which Windows lacks, from third_party/zlib into libnitrocdr.a)
+WINCXX  ?= $(patsubst %clang,%clang++,$(WINCC))
+WINAR   ?= $(if $(findstring /,$(WINCC)),$(dir $(WINCC)))llvm-ar
+ZLIB    := third_party/zlib
+WIN_OBJS :=
+WIN_DEFS :=
+ifeq ($(CDR),1)
+WIN_DEFS += -DNV_CDR
+WIN_OBJS += build/win/libnitrocdr.a
+endif
+ifeq ($(SVG),1)
+WIN_DEFS += -DNV_SVG
+WIN_OBJS += build/win/libnitrosvg.a
+endif
+WIN_CXXLIBS := $(if $(WIN_OBJS),-lc++)
+build/win/libnitrosvg.a: CC = $(WINCC)
+build/win/libnitrosvg.a: CXX = $(WINCXX)
+build/win/libnitrosvg.a: AR = $(WINAR)
+build/win/libnitrosvg.a: src/nitrosvg.cpp src/nitrosvg.h $(SVG_STAMP)
+	$(call svg_lib,-march=$(WINARCH))
+build/win/libnitrocdr.a: CC = $(WINCC)
+build/win/libnitrocdr.a: CXX = $(WINCXX)
+build/win/libnitrocdr.a: AR = $(WINAR)
+build/win/libnitrocdr.a: CDR_C += $(addprefix $(ZLIB)/,adler32.c crc32.c inflate.c inffast.c inftrees.c zutil.c)
+build/win/libnitrocdr.a: CDR_DEFS += -I$(ZLIB)
+build/win/libnitrocdr.a: src/nitrocdr.cpp src/nitrocdr.h $(CDR_STAMP)
+	$(call cdr_lib,-march=$(WINARCH) -I$(ZLIB))
+nitroview.exe: src/nitroview_win.c $(DEC_SRC) $(DEC_HDR) build/nitroview_res.o $(WIN_OBJS) src/nitrosvg.h src/nitrocdr.h
+	$(WINCC) $(WINFLAGS) $(WIN_DEFS) -Ibuild -Isrc -municode src/nitroview_win.c $(DEC_SRC) build/nitroview_res.o $(WIN_OBJS) $(WINLIBS) $(WIN_CXXLIBS) -o $@
 windows: nitroview.exe bench/nbench.exe bench/psdverify.exe
-	@echo "built nitroview.exe bench/nbench.exe bench/psdverify.exe (Windows x64, $(WINARCH))"
+	@echo "built nitroview.exe bench/nbench.exe bench/psdverify.exe (Windows x64, $(WINARCH), SVG: $(if $(filter 1,$(SVG)),yes,no), CDR: $(if $(filter 1,$(CDR)),yes,no))"
 
 # Distribution. zip: ditto keeps the signature and the bundle's attributes (like Finder > Compress).
 zip: app

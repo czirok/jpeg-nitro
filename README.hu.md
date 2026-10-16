@@ -28,7 +28,7 @@ Apple hardveres JPEG-dekódere (lásd lent: „Apple Silicon (M1)”). A dekóde
 C-fájlok, önállóan is használhatók. A fotósorozatok (pl.
 timelapse) teljes felbontásban, valós időben „lejátszhatók”, akár 60 kép/s-mal. A HEIC, TIFF,
 WebP, GIF és BMP macOS-en az Apple ImageIO-val, Windowson a WIC-kel, Linuxon a GTK betöltőivel nyílik
-meg (lásd lent: „Windows” és „GNOME / Linux”). macOS-en vektoros rajzokat is mutat: **SVG**-t
+meg (lásd lent: „Windows” és „GNOME / Linux”). macOS-en és Windowson vektoros rajzokat is mutat: **SVG**-t
 (lunasvg) és **CorelDRAW** CDR / CMX fájlokat (libcdr, a saját, sok javítást tartalmazó forkunk),
 bármekkora nagyításban élesen, és ugyanolyan gyors lapozással, mint a fotóknál (lásd lent: „SVG” és
 „CorelDRAW”); a GNOME-os változat az SVG-t a GTK-val jeleníti meg.
@@ -97,7 +97,7 @@ Az átlátszó képek fekete háttéren jelennek meg. 38 valódi PNG-n (képerny
 AI-képek, felskálázott textúrák, Photoshop-exportok) a nitropng átlag **~43 ms/kép**, a Wuffs
 ~171, az ImageIO ~318 ms (lásd lent: „nitropng”).
 
-**SVG** (macOS-en, ha a `scripts/get-deps.sh` letöltötte a [lunasvg](https://github.com/sammycage/lunasvg)-t):
+**SVG** (macOS-en és Windowson, ha a `scripts/get-deps.sh` letöltötte a [lunasvg](https://github.com/sammycage/lunasvg)-t):
 a lunasvg rajzolja fehér háttérre, először egészben, a hosszabbik oldalt 1024–4096 pixelre
 igazítva (a kis ikonok nagyobbak lesznek, a hatalmas rajzok kisebbek; teljes képernyőn vagy a 0
 billentyű után legalább képernyőméretben, az előre betöltött képek is, így rögtön élesek), így a lapozás, az
@@ -117,7 +117,7 @@ méretű rétegeket foglaltak (összeomlás). Amit nem: szűrők (az árnyék é
 sprite-fájlok, amelyek nem rajzolnak semmit. Egy Macről összegyűjtött 883 SVG-ből (ikonok, logók,
 ábrák, Illustrator-exportok) 867 nyílik meg; a többi 16 böngészőben sem rajzol semmit.
 
-**CorelDRAW** (CDR és CMX, macOS-en, ha a `scripts/get-deps.sh` letöltötte a libcdr-t): a libcdr
+**CorelDRAW** (CDR és CMX, macOS-en és Windowson, ha a `scripts/get-deps.sh` letöltötte a libcdr-t): a libcdr
 (a LibreOffice-é, az Inkscape és a LibreOffice Draw is ezt használja) olvassa be a rajzot; a nitrocdr
 (`src/nitrocdr.cpp`) rajzlistába gyűjti, amit átad, és közvetlenül a plutovg-vel rajzolja ki, SVG
 nélkül, így a beágyazott szkennelések és fotók bitképként maradnak a memóriában. A megjelenített
@@ -170,7 +170,8 @@ a futó néző átveszi az új fájl(oka)t.
 ugyanez a néző: ugyanazok a billentyűk, egérfunkciók, nagyítás és ablakméretezés, teljes képernyő,
 diavetítés, egy fájlból a mappája, ráhúzás. A JPEG / PNG / PSD a három dekóderrel és egy compute
 shaderrel megy, minden más (progresszív JPEG, HEIC, TIFF, WebP, GIF, BMP) a Windows saját WIC-
-kodekjeivel. Egyetlen önálló .exe (csak rendszer-DLL-ek, Windows 10-től), Macen vagy Linuxon
+kodekjeivel; az SVG és a CorelDRAW CDR / CMX ugyanúgy, mint macOS-en (nagyítva éles, [ / ] a rajz
+oldalai között). Egyetlen önálló .exe (csak rendszer-DLL-ek, Windows 10-től), Macen vagy Linuxon
 fordítható a `make windows`-szal (lásd lent: „A dekóderek más rendszeren”). A `nitroview.exe --register`
 felajánlja az összes ilyen típushoz az Intézőben (az aktuális felhasználónak, rendszergazdai jog
 nélkül), és megnyitja a Beállítások → Alapértelmezett alkalmazások oldalt, ahol ki kell választani

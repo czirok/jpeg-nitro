@@ -8,12 +8,15 @@
 //
 // Keys, mouse and window behaviour as on macOS (see README): PgDn/Space next,
 // PgUp/Backspace previous, Home/End, +/- zoom, 0 fit to screen, 1..8 zoom 100..800%,
-// W window to image, arrows pan, F/Enter full screen, P pause slideshow, Esc/Q quit.
+// W window to image, arrows pan, F/Enter full screen, P pause slideshow, Esc/Q quit,
+// [ / ] the pages of a multi-page CorelDRAW drawing.
 //
 // Pipeline: file -> nitrojpeg / nitropng / nitropsd (multi-threaded, into a
 // buffer the decoder thread hands to Direct3D) -> compute shader (upsampling,
 // YCbCr->RGB, PNG rows, PSD planes) -> mipmaps -> trilinear scaled draw.
 // Anything else goes through WIC (progressive JPEG, HEIC, TIFF, WebP, GIF, BMP).
+// SVG / CorelDRAW (optional, NV_SVG / NV_CDR): nitrosvg / nitrocdr render it once in full as
+// BGRA, and the visible part again, sharp, when zoomed in (as nitroview.m does).
 // Neighbouring images are decoded ahead in the background.
 #define COBJMACROS
 #define WIN32_LEAN_AND_MEAN
@@ -37,6 +40,15 @@
 #include "nitrojpeg.h"
 #include "nitropng.h"
 #include "nitropsd.h"
+#ifdef NV_SVG
+#include "nitrosvg.h"   // optional SVG rendering (lunasvg)
+#endif
+#ifdef NV_CDR
+#include "nitrocdr.h"   // optional CorelDRAW rendering (libcdr + plutovg)
+#endif
+#if defined(NV_SVG) || defined(NV_CDR)
+#define NV_VECTOR 1     // vector images: rendered again, sharp, when zoomed in
+#endif
 
 #ifndef M_SQRT2
 #define M_SQRT2 1.41421356237309504880
@@ -49,7 +61,10 @@
 #define AHEAD 3     // images decoded ahead in the paging direction
 #define BEHIND 2    // ... and kept / decoded behind
 #define WM_APP_DECODED (WM_APP + 1)
+#define WM_APP_DETAIL (WM_APP + 2)   // a vector image's sharp detail is rendered
+#define WM_APP_PAGE (WM_APP + 3)     // another page of a multi-page document is drawn
 #define TIMER_SLIDE 1
+#define TIMER_DETAIL 2
 
 static double now_ms(void) {
     static LARGE_INTEGER f;
@@ -80,7 +95,34 @@ static const wchar_t *base_name(const wchar_t *p) {
 // decoded image
 
 typedef enum { KIND_YUV = 0, KIND_BGRA = 1, KIND_PNG = 2, KIND_PLANAR = 3 } Kind;
-enum { MODE_WIC = -3, MODE_NITROPNG = -4, MODE_NITROPSD = -5 };
+enum { MODE_WIC = -3, MODE_NITROPNG = -4, MODE_NITROPSD = -5, MODE_SVG = -6, MODE_CDR = -7 };
+
+#ifdef NV_VECTOR
+// A loaded vector document (SVG, CorelDRAW), shared by the images of its pages and the background
+// renders of their sharp detail: reference counted, freed by whichever drops it last.
+typedef struct {
+    void *doc;
+    int (*render)(void *doc, int page, uint8_t *bgra, int w, int h, size_t pitch, double scale, double x0, double y0);
+    void (*size)(void *doc, int page, double *w, double *h);
+    void (*free)(void *doc);
+    int pages, mode;
+    volatile LONG refs;
+} VectorDoc;
+static VectorDoc *vec_ref(VectorDoc *v) {
+    if (v) InterlockedIncrement(&v->refs);
+    return v;
+}
+static void vec_unref(VectorDoc *v) {
+    if (v && !InterlockedDecrement(&v->refs)) {
+        v->free(v->doc);
+        free(v);
+    }
+}
+// Shown fitted to the screen (full screen or key 0), the main thread sets the screen's size in
+// pixels here: vector images are then rendered at least that large (the prefetched ones too),
+// sharp from the start, not first enlarged and sharpened a moment later by the detail render.
+static volatile LONG g_vec_tw, g_vec_th;
+#endif
 
 typedef struct {
     Kind kind;
@@ -97,6 +139,14 @@ typedef struct {
     ID3D11ShaderResourceView *texsrv;
     double read_ms, decode_ms, upload_ms, conv_ms;
     int mode, bands;
+#ifdef NV_VECTOR
+    VectorDoc *vec;                    // SVG / CDR: the document (this is its page `page`)
+    int page;
+    double vscale;                     // decoded pixels per document unit
+    ID3D11Texture2D *dtex;             // sharp detail (main thread): the visible part rendered at screen
+    ID3D11ShaderResourceView *dsrv;    // resolution, over the rectangle dx, dy, dw, dh of the image
+    double dx, dy, dw, dh, dscale;     // (decoded pixels), at dscale device pixels per decoded pixel
+#endif
 } Decoded;
 
 static const char *mode_name(int m) {
@@ -107,6 +157,8 @@ static const char *mode_name(int m) {
     case MODE_WIC: return "wic";
     case MODE_NITROPNG: return "nitropng";
     case MODE_NITROPSD: return "nitropsd";
+    case MODE_SVG: return "svg";
+    case MODE_CDR: return "cdr";
     default: return "?";
     }
 }
@@ -242,7 +294,14 @@ static int has_ext(const wchar_t *path, const wchar_t *const *exts) {
     return 0;
 }
 static const wchar_t *const g_exts[] = {L"jpg", L"jpeg", L"jpe", L"jfif", L"png", L"heic", L"heif", L"tif", L"tiff",
-                                        L"webp", L"gif", L"bmp", L"psd", L"psb", NULL};
+                                        L"webp", L"gif", L"bmp", L"psd", L"psb",
+#ifdef NV_SVG
+                                        L"svg",
+#endif
+#ifdef NV_CDR
+                                        L"cdr", L"cmx",
+#endif
+                                        NULL};
 
 typedef struct { wchar_t **v; int n, cap; } FileList;
 
@@ -695,6 +754,11 @@ static void decoded_free(Decoded *d) {   // main thread
     if (d->rawsrv) ID3D11ShaderResourceView_Release(d->rawsrv);
     if (d->raw) ID3D11Buffer_Release(d->raw);
     release_planes(d);
+#ifdef NV_VECTOR
+    if (d->dsrv) ID3D11ShaderResourceView_Release(d->dsrv);
+    if (d->dtex) ID3D11Texture2D_Release(d->dtex);
+    vec_unref(d->vec);
+#endif
     free(d);
 }
 
@@ -800,6 +864,91 @@ static int is_psd_name(const wchar_t *p) {
     return has_ext(p, e);
 }
 
+#ifdef NV_VECTOR
+#ifdef NV_SVG
+static int svg_render(void *doc, int page, uint8_t *bgra, int w, int h, size_t pitch, double scale, double x0, double y0) {
+    (void)page;
+    return nitrosvg_render(doc, bgra, w, h, pitch, scale, x0, y0);
+}
+static void svg_size(void *doc, int page, double *w, double *h) {
+    (void)page;
+    nitrosvg_size(doc, w, h);
+}
+static void svg_free(void *doc) { nitrosvg_free(doc); }
+#endif
+#ifdef NV_CDR
+static int cdr_render(void *doc, int page, uint8_t *bgra, int w, int h, size_t pitch, double scale, double x0, double y0) {
+    return nitrocdr_render(doc, page, bgra, w, h, pitch, scale, x0, y0);
+}
+static void cdr_size(void *doc, int page, double *w, double *h) { nitrocdr_size(doc, page, w, h); }
+static void cdr_free(void *doc) { nitrocdr_free(doc); }
+#endif
+
+// An SVG / CDR / CMX file by its name: the document (one reference), else NULL.
+static VectorDoc *load_vector(const wchar_t *path, const uint8_t *data, size_t len) {
+    VectorDoc v = {0};
+#ifdef NV_SVG
+    static const wchar_t *const svg_exts[] = {L"svg", NULL};
+    if (has_ext(path, svg_exts) && (v.doc = nitrosvg_load(data, len))) {
+        v.render = svg_render;
+        v.size = svg_size;
+        v.free = svg_free;
+        v.pages = 1;
+        v.mode = MODE_SVG;
+    }
+#endif
+#ifdef NV_CDR
+    static const wchar_t *const cdr_exts[] = {L"cdr", L"cmx", NULL};
+    if (!v.doc && has_ext(path, cdr_exts) && (v.doc = nitrocdr_load(data, len))) {
+        v.render = cdr_render;
+        v.size = cdr_size;
+        v.free = cdr_free;
+        v.pages = nitrocdr_pages(v.doc);
+        v.mode = MODE_CDR;
+    }
+#endif
+    if (!v.doc) return NULL;
+    VectorDoc *p = malloc(sizeof *p);
+    if (!p) { v.free(v.doc); return NULL; }
+    *p = v;
+    p->refs = 1;
+    return p;
+}
+
+// Renders a page of v as the image of d, in full: the long side 1024..4096 pixels (small icons
+// enlarged, huge drawings reduced), at least the fit-to-screen target, over white. Returns the
+// pixels (pool buffer) or NULL; d takes a reference to v.
+static uint8_t *decode_vector_page(VectorDoc *v, int page, Decoded *d, size_t *cap) {
+    double w = 0, h = 0;
+    v->size(v->doc, page, &w, &h);
+    if (!(w > 0 && h > 0)) return NULL;
+    double l = MAX(w, h), k = l < 1024 ? 1024 / l : l > 4096 ? 4096 / l : 1;
+    LONG tw = g_vec_tw, th = g_vec_th;
+    if (tw > 0 && th > 0) k = MAX(k, MIN(tw / w, th / h));
+    k = MIN(k, MAX_TEX / l);
+    int iw = MAX(1, MIN(MAX_TEX, (int)lround(w * k))), ih = MAX(1, MIN(MAX_TEX, (int)lround(h * k)));
+    size_t pitch = (size_t)iw * 4;
+    uint8_t *buf = buf_get(pitch * ih, cap);
+    if (!buf) return NULL;
+    if (v->render(v->doc, page, buf, iw, ih, pitch, k, 0, 0)) {
+        buf_put(buf, *cap);
+        return NULL;
+    }
+    d->kind = KIND_BGRA;
+    d->width = iw;
+    d->height = ih;
+    d->pitch[0] = pitch;
+    d->size = pitch * ih;
+    d->mode = v->mode;
+    d->bands = 1;
+    d->orientation = 1;
+    d->vec = vec_ref(v);
+    d->page = page;
+    d->vscale = k;
+    return buf;
+}
+#endif
+
 // Decodes one file and hands it to the GPU. NULL: cannot be decoded.
 static Decoded *decode_file(const wchar_t *path) {
     double t0 = now_ms();
@@ -821,6 +970,13 @@ static Decoded *decode_file(const wchar_t *path) {
     d->orientation = 1;
     uint8_t *buf = NULL;
     size_t cap = 0;
+#ifdef NV_VECTOR
+    VectorDoc *vec = load_vector(path, data, len);
+    if (vec) {
+        buf = decode_vector_page(vec, 0, d, &cap);
+        vec_unref(vec);   // (d keeps its own reference)
+    } else
+#endif
     if (len >= 8 && !memcmp(data, "\x89PNG\r\n\x1a\n", 8)) {
         np_info pi;   // nitropng: 8-bit gray / gray+alpha / RGB / RGBA, non-interlaced
         if (!np_read_info(data, len, &pi) && pi.supported && pi.width <= MAX_TEX && pi.height <= MAX_TEX) {
@@ -908,7 +1064,13 @@ static Decoded *decode_file(const wchar_t *path) {
     buf_put(buf, cap);
     d->decode_ms = t2 - t1;
     d->upload_ms = now_ms() - t2;
-    if (up) { free(d); return NULL; }
+    if (up) {
+#ifdef NV_VECTOR
+        vec_unref(d->vec);
+#endif
+        free(d);
+        return NULL;
+    }
     return d;
 }
 
@@ -994,6 +1156,42 @@ static void loader_replace(wchar_t **files, int n, int old_index, int new_index)
     WakeConditionVariable(&L.cv);
     ReleaseSRWLockExclusive(&L.lock);
 }
+
+#ifdef NV_VECTOR
+// The size vector images are rendered for changed (g_vec_tw): prefetched ones too small for it
+// are dropped and rendered again (the current one is sharpened by the detail render).
+static void loader_vector_target_changed(void) {
+    LONG tw = g_vec_tw, th = g_vec_th;
+    AcquireSRWLockExclusive(&L.lock);
+    for (int c = 0; c < L.ncache;) {
+        Decoded *d = L.cache[c].d;
+        if (d->vec && L.cache[c].index != L.cur && tw > 0 && th > 0 &&
+            MIN((double)tw / d->width, (double)th / d->height) > 1.01 && MAX(d->width, d->height) < MAX_TEX) {
+            bury_locked(d);
+            L.cache[c] = L.cache[--L.ncache];
+        } else {
+            c++;
+        }
+    }
+    WakeConditionVariable(&L.cv);
+    ReleaseSRWLockExclusive(&L.lock);
+}
+
+// Another page of image i drawn: it replaces old (if i still shows it). Returns whether it did.
+static int loader_replace_page(int i, Decoded *old, Decoded *d) {
+    int done = 0;
+    AcquireSRWLockExclusive(&L.lock);
+    for (int c = 0; c < L.ncache; c++)
+        if (L.cache[c].index == i && L.cache[c].d == old) {
+            L.cache[c].d = d;
+            bury_locked(old);
+            done = 1;
+        }
+    if (!done) bury_locked(d);
+    ReleaseSRWLockExclusive(&L.lock);
+    return done;
+}
+#endif
 
 // Priority order: current, then AHEAD in the paging direction, then BEHIND.
 static int wanted_locked(int *w) {
@@ -1169,6 +1367,12 @@ static void update_title(void) {
     else
         _snwprintf(t, 1024, L"%ls  (%d/%d)  %ls", name, V.index + 1, V.nfiles,
                    loader_failed(V.index) ? L"CANNOT DECODE (unsupported or damaged)" : L"loading...");
+#ifdef NV_VECTOR
+    if (d && d->vec && d->vec->pages > 1) {
+        size_t n = wcslen(t);
+        _snwprintf(t + n, 1024 - n, L"  [page %d/%d]", d->page + 1, d->vec->pages);
+    }
+#endif
     if (V.slide_ms > 0) {
         size_t n = wcslen(t);
         if (V.paused) _snwprintf(t + n, 1024 - n, L"   [slideshow paused: P]");
@@ -1219,11 +1423,33 @@ static void zoom_fit(void) {
     redraw();
 }
 
-static void fit_to_screen(void) { V.fit_screen = 1; zoom_fit(); }
+// Fitted to the screen (full screen or key 0): vector images are rendered for its size.
+static void update_vector_target(void) {
+#ifdef NV_VECTOR
+    LONG tw = 0, th = 0;
+    if (V.hwnd && (V.fullscreen || V.fit_screen)) {
+        MONITORINFO mi = {.cbSize = sizeof mi};
+        GetMonitorInfoW(MonitorFromWindow(V.hwnd, MONITOR_DEFAULTTONEAREST), &mi);
+        tw = mi.rcMonitor.right - mi.rcMonitor.left;
+        th = mi.rcMonitor.bottom - mi.rcMonitor.top;
+    }
+    if (tw == g_vec_tw && th == g_vec_th) return;
+    InterlockedExchange(&g_vec_tw, tw);
+    InterlockedExchange(&g_vec_th, th);
+    loader_vector_target_changed();
+#endif
+}
+
+static void fit_to_screen(void) {
+    V.fit_screen = 1;
+    update_vector_target();
+    zoom_fit();
+}
 
 static void window_to_image(void) {
     V.user_sized = 0;
     V.fit_screen = 0;
+    update_vector_target();
     zoom_fit();
     Decoded *d = loader_get(V.index);
     if (d) fit_window_to(d);
@@ -1395,6 +1621,183 @@ static void make_rtv(void) {
     }
 }
 
+#ifdef NV_VECTOR
+// A vector image zoomed in beyond its decoded size (more than one device pixel per decoded pixel):
+// the visible part is rendered again at screen resolution ~80 ms after the zoom or position last
+// changed (a background thread), and drawn over the image; until then the previous one is scaled.
+typedef struct {
+    double ox, oy;               // the image's top left corner on the screen (device pixels)
+    double dx, dy, dw, dh;       // the visible part of the image (decoded pixels)
+    double scale;                // device pixels per decoded pixel
+    int w, h;                    // its size on the screen
+} DetailRect;
+
+static int detail_target(const Decoded *d, DetailRect *r) {   // (after draw_params: same centre)
+    if (!d->vec) return 0;
+    double iw, ih;
+    display_size(d, &iw, &ih);
+    double s = current_scale(d);
+    if (s <= 1.01) return 0;
+    double cx = V.zoomed ? V.cx : iw / 2, cy = V.zoomed ? V.cy : ih / 2;
+    r->ox = round(V.vw / 2.0 - cx * s);
+    r->oy = round(V.vh / 2.0 - cy * s);
+    double l = MAX(0, r->ox), t = MAX(0, r->oy), rr = MIN(V.vw, r->ox + iw * s), b = MIN(V.vh, r->oy + ih * s);
+    r->w = (int)ceil(rr - l);
+    r->h = (int)ceil(b - t);
+    if (r->w <= 0 || r->h <= 0) return 0;
+    r->scale = s;
+    r->dx = (l - r->ox) / s;
+    r->dy = (t - r->oy) / s;
+    r->dw = r->w / s;
+    r->dh = r->h / s;
+    return 1;
+}
+static int detail_current(const Decoded *d, const DetailRect *r) {
+    return d->dsrv && d->dscale == r->scale && d->dx == r->dx && d->dy == r->dy && d->dw == r->dw && d->dh == r->dh;
+}
+
+typedef struct {
+    Decoded *d;                  // (identified with vec and page: d itself may be gone by then)
+    VectorDoc *vec;              // (a reference: the document stays while it renders)
+    int page;
+    double vscale;
+    DetailRect r;
+    uint8_t *px;
+    double ms;
+} DetailJob;
+static int g_detail_busy;   // (main thread)
+
+static DWORD WINAPI detail_run(void *arg) {
+    DetailJob *j = arg;
+    double t = now_ms(), k = j->vscale * j->r.scale;
+    j->px = malloc((size_t)j->r.w * j->r.h * 4);
+    if (j->px && j->vec->render(j->vec->doc, j->page, j->px, j->r.w, j->r.h, (size_t)j->r.w * 4, k, j->r.dx / j->vscale,
+                                j->r.dy / j->vscale)) {
+        free(j->px);
+        j->px = NULL;
+    }
+    j->ms = now_ms() - t;
+    PostMessageW(V.hwnd, WM_APP_DETAIL, (WPARAM)j, 0);
+    return 0;
+}
+
+static void start_detail(void) {   // TIMER_DETAIL
+    Decoded *d = loader_get(V.index);
+    DetailRect r;
+    if (g_detail_busy || !d || !detail_target(d, &r) || detail_current(d, &r)) return;
+    DetailJob *j = calloc(1, sizeof *j);
+    if (!j) return;
+    j->d = d;
+    j->vec = vec_ref(d->vec);
+    j->page = d->page;
+    j->vscale = d->vscale;
+    j->r = r;
+    HANDLE th = CreateThread(NULL, 0, detail_run, j, 0, NULL);
+    if (!th) {
+        vec_unref(j->vec);
+        free(j);
+        return;
+    }
+    CloseHandle(th);
+    g_detail_busy = 1;
+}
+
+static void detail_done(DetailJob *j) {   // WM_APP_DETAIL
+    g_detail_busy = 0;
+    Decoded *d = loader_get(V.index);
+    if (j->px && d == j->d && d->vec == j->vec && d->page == j->page) {
+        D3D11_TEXTURE2D_DESC td = {(UINT)j->r.w, (UINT)j->r.h, 1, 1, DXGI_FORMAT_B8G8R8A8_UNORM, {1, 0},
+                                   D3D11_USAGE_IMMUTABLE, D3D11_BIND_SHADER_RESOURCE, 0, 0};
+        D3D11_SUBRESOURCE_DATA sd = {j->px, (UINT)j->r.w * 4, 0};
+        ID3D11Texture2D *t = NULL;
+        ID3D11ShaderResourceView *v = NULL;
+        if (SUCCEEDED(ID3D11Device_CreateTexture2D(g_dev, &td, &sd, &t)) &&
+            SUCCEEDED(ID3D11Device_CreateShaderResourceView(g_dev, (ID3D11Resource *)t, NULL, &v))) {
+            if (d->dsrv) ID3D11ShaderResourceView_Release(d->dsrv);
+            if (d->dtex) ID3D11Texture2D_Release(d->dtex);
+            d->dtex = t;
+            d->dsrv = v;
+            d->dscale = j->r.scale;
+            d->dx = j->r.dx;
+            d->dy = j->r.dy;
+            d->dw = j->r.dw;
+            d->dh = j->r.dh;
+            if (getenv("NV_DEBUG_SVG")) printf("vector detail %dx%d at %.0f%%: %.1f ms\n", j->r.w, j->r.h, 100 * j->r.scale, j->ms);
+        } else if (t) {
+            ID3D11Texture2D_Release(t);
+        }
+    }
+    free(j->px);
+    vec_unref(j->vec);
+    free(j);
+    redraw();   // (a view changed meanwhile asks for its own detail)
+}
+
+// Multi-page documents (CorelDRAW): [ and ] draw another page in the background; it replaces the
+// shown image (the document is shared, only the page is drawn).
+typedef struct {
+    Decoded *old, *d;
+    VectorDoc *vec;
+    int page, index;
+} PageJob;
+
+static DWORD WINAPI page_run(void *arg) {
+    PageJob *j = arg;
+    Decoded *d = calloc(1, sizeof *d);
+    size_t cap = 0;
+    double t1 = now_ms();
+    uint8_t *buf = d ? decode_vector_page(j->vec, j->page, d, &cap) : NULL;
+    if (buf) {
+        double t2 = now_ms();
+        int up = gpu_upload(d, buf);
+        buf_put(buf, cap);
+        d->decode_ms = t2 - t1;
+        d->upload_ms = now_ms() - t2;
+        if (up) {
+            vec_unref(d->vec);
+            free(d);
+            d = NULL;
+        }
+    } else {
+        free(d);
+        d = NULL;
+    }
+    j->d = d;
+    PostMessageW(V.hwnd, WM_APP_PAGE, (WPARAM)j, 0);
+    return 0;
+}
+
+static void show_page(int delta) {
+    Decoded *d = loader_get(V.index);
+    if (!d || !d->vec || d->page + delta < 0 || d->page + delta >= d->vec->pages) return;
+    PageJob *j = calloc(1, sizeof *j);
+    if (!j) return;
+    j->old = d;
+    j->vec = vec_ref(d->vec);
+    j->page = d->page + delta;
+    j->index = V.index;
+    HANDLE th = CreateThread(NULL, 0, page_run, j, 0, NULL);
+    if (!th) {
+        vec_unref(j->vec);
+        free(j);
+        return;
+    }
+    CloseHandle(th);
+}
+
+static void page_done(PageJob *j) {   // WM_APP_PAGE
+    if (j->d && loader_replace_page(j->index, j->old, j->d) && j->index == V.index) {
+        V.zoomed = 0;   // (pages may differ in size)
+        size_window_for(j->d);
+        update_title();
+        redraw();
+    }
+    vec_unref(j->vec);
+    free(j);
+    loader_reap();
+}
+#endif
+
 static void render(void) {
     if (!V.swap || !V.rtv || V.vw <= 0 || V.vh <= 0) return;
     loader_reap();
@@ -1424,6 +1827,20 @@ static void render(void) {
         ID3D11SamplerState *ss[2] = {g_samp_lin, g_samp_pt};
         ID3D11DeviceContext_PSSetSamplers(g_ctx, 0, 2, ss);
         ID3D11DeviceContext_Draw(g_ctx, 4, 0);
+#ifdef NV_VECTOR
+        DetailRect r;
+        if (detail_target(d, &r)) {
+            if (d->dsrv) {   // the sharp detail over its part of the image, scaled to the current view
+                double s = r.scale, l = r.ox + d->dx * s, t = r.oy + d->dy * s;
+                DrawParams q = {{(float)(l / V.vw * 2 - 1), (float)(1 - t / V.vh * 2)},
+                                {(float)(2 * d->dw * s / V.vw), (float)(2 * d->dh * s / V.vh)}, 1, 0, {0, 0}};
+                ID3D11DeviceContext_UpdateSubresource(g_ctx, (ID3D11Resource *)g_cb_draw, 0, NULL, &q, 0, 0);
+                ID3D11DeviceContext_PSSetShaderResources(g_ctx, 1, 1, &d->dsrv);
+                ID3D11DeviceContext_Draw(g_ctx, 4, 0);
+            }
+            if (!detail_current(d, &r)) SetTimer(V.hwnd, TIMER_DETAIL, 80, NULL);   // (each change postpones it)
+        }
+#endif
     }
     IDXGISwapChain1_Present(V.swap, 1, 0);
     if (srv && !V.reported) {
@@ -1458,6 +1875,7 @@ static void toggle_fullscreen(void) {
         Decoded *d = loader_get(V.index);
         if (d) size_window_for(d);
     }
+    update_vector_target();
     update_title();
     redraw();
 }
@@ -1479,6 +1897,10 @@ static void on_char(wchar_t ch) {   // zoom keys by character: any keyboard layo
         if (cur) set_scale(ch - L'0', cur, 0, 0);
         break;
     case L'w': case L'W': window_to_image(); break;
+#ifdef NV_VECTOR
+    case L'[': show_page(-1); break;   // the pages of a multi-page CorelDRAW drawing
+    case L']': show_page(1); break;
+#endif
     default: break;
     }
 }
@@ -1587,6 +2009,10 @@ static LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
         loader_reap();
         if ((int)wp >= 0) image_decoded((int)wp);
         return 0;
+#ifdef NV_VECTOR
+    case WM_APP_DETAIL: detail_done((DetailJob *)wp); return 0;
+    case WM_APP_PAGE: page_done((PageJob *)wp); return 0;
+#endif
     case WM_PAINT:
         render();
         ValidateRect(h, NULL);
@@ -1604,6 +2030,7 @@ static LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
         }
         // any resize we didn't do ourselves (edge drag, maximize, Snap) is the user's choice
         if (!V.self_resizing && !V.fullscreen && V.started) V.user_sized = 1;
+        update_vector_target();   // (full screen on / off, another screen)
         if (V.files) update_title();   // the fit percentage changes with the window size
         redraw();
         return 0;
@@ -1615,6 +2042,13 @@ static LRESULT CALLBACK wndproc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     }
     case WM_TIMER:
+#ifdef NV_VECTOR
+        if (wp == TIMER_DETAIL) {
+            KillTimer(h, TIMER_DETAIL);
+            start_detail();
+            return 0;
+        }
+#endif
         if (wp == TIMER_SLIDE) {
             KillTimer(h, TIMER_SLIDE);
             if (!V.paused) page(1);
@@ -1749,7 +2183,14 @@ static int create_window(const wchar_t *first) {
 // file association (--register / --unregister): for the current user, no admin rights
 
 static const wchar_t *const g_assoc_exts[] = {L".jpg", L".jpeg", L".jpe", L".jfif", L".png", L".psd", L".psb", L".heic",
-                                              L".heif", L".tif", L".tiff", L".webp", L".gif", L".bmp", NULL};
+                                              L".heif", L".tif", L".tiff", L".webp", L".gif", L".bmp",
+#ifdef NV_SVG
+                                              L".svg",
+#endif
+#ifdef NV_CDR
+                                              L".cdr", L".cmx",
+#endif
+                                              NULL};
 #define PROGID L"NitroView.Image"
 
 static int reg_str(const wchar_t *key, const wchar_t *name, const wchar_t *val) {
