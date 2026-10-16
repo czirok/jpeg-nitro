@@ -22,7 +22,7 @@ HEIC photos in parallel, and two for vector drawings:
 | **nitrojpeg** | baseline JPEG | speculative parallel Huffman decoding, AVX2 IDCT; bit-exact with libjpeg-turbo | 24 MP photo: **~11 ms** | libjpeg-turbo ~107 ms (1 thread) |
 | **nitropng** | PNG (8-bit, non-interlaced) | speculative parallel inflate (back-references into not yet known data resolved later, Adler-32 verified) + "wavefront" filter reversal | 38 real PNGs: **~43 ms** avg. | Wuffs ~171 ms, ImageIO ~318 ms |
 | **nitropsd** | Photoshop PSD/PSB (8-bit RGB / gray) | merged image: RLE rows in parallel, ZIP via nitropng's inflate; reads only the merged image of huge layered files | 24 MP RLE: **~5 ms** | ImageIO ~170 ms |
-| **nitroheic** (macOS) | HEIC (8-bit 4:2:0 HEVC, iPhone grids) | own HEIF parsing; the 48 independent HEVC tiles of an iPhone photo decoded in parallel by VideoToolbox (Intel: software decoders, one per core; Apple Silicon: 4 sessions on the media engine) into Y/Cb/Cr for the GPU | 12 MP iPhone photo: **~33 ms** (i9), **~25 ms** (M1) | ImageIO ~200 ms (i9), ~59 ms (M1) |
+| **nitroheic** (macOS) | HEIC (8-bit 4:2:0 HEVC, iPhone grids) | own HEIF parsing; the 48 independent HEVC tiles of an iPhone photo decoded in parallel by VideoToolbox into Y/Cb/Cr for the GPU | 12 MP iPhone photo: **~33 ms** | ImageIO ~200 ms |
 | **nitrosvg** | SVG (without filters) | lunasvg parser + plutovg renderer, with font lookup in the system and user font folders | 38 MB SVG: **~0.53 s** | WebKit ~1.4 s, CoreSVG ~2.4 s |
 | **nitrocdr** | CorelDRAW 5 – X6 (CDR), CMX | our [libcdr fork](https://github.com/gereoffy/libcdr) with many fixes (text styles, line spacing, clipping, bitmap transparency) and a 2× faster librevenge; draws directly with plutovg | 17.7 MB all-vector CDR: **~1.8 s**, ~3× faster | original libcdr `cdr2xhtml` ~5.4 s (only converting to SVG) |
 
@@ -36,7 +36,7 @@ the full-size JPEG the camera stored in them (nitrojpeg, in milliseconds instead
 nitroheic (`src/nitroheic.c`): an iPhone photo is a grid of 48 independent HEVC tiles, decoded here
 in parallel (Intel: software VideoToolbox decoders, one per core; Apple Silicon: 4 sessions on the
 media engine) into Y/Cb/Cr planes converted on the GPU — 12 MP in ~33 ms instead of ImageIO's ~200 ms
-on an Intel i9, ~26 ms instead of ~59 ms on an M1. TIFF, WebP, GIF, BMP and other HEICs open
+on an Intel i9 (M1: see [below](#apple-silicon-m1)). TIFF, WebP, GIF, BMP and other HEICs open
 through Apple ImageIO on macOS, WIC on Windows and GTK's loaders on Linux (see **Windows** and
 **GNOME / Linux** below). On macOS and Windows it also shows vector drawings, **SVG** (lunasvg) and
 **CorelDRAW** CDR / CMX (libcdr, our fork with many fixes), sharp at any zoom and paging as fast
@@ -289,6 +289,21 @@ There is no hardware PNG decoder, so ImageIO is equally slow on both. On the M1 
 faster than Wuffs and 4× faster than ImageIO. Its Adler-32 and back-reference resolving use NEON
 there (AVX2 on x86): that took it from ~100 to 90 ms; most of the time is Huffman decoding
 and the row filters, which are plain C on both.
+
+HEIC (`build/m1test/vtbench`: the 48 tiles of 20 iPhone photos, 12 MP, through VideoToolbox in
+different ways, decoder sessions included; the last row: `nitroview --bench` on all 155; ms/image):
+
+| decoder | M1 | i9 |
+|---|---|---|
+| Apple ImageIO | 58–60 | 176 |
+| VideoToolbox hardware, 1 session | 52 | 135 |
+| VideoToolbox hardware, 4 (M1) / 8 (i9) sessions | **24–29** | 224 |
+| VideoToolbox software, 4 / 8 sessions | 62–75 | **42** |
+| **nitroheic** (in the viewer) | **25** | **33** |
+
+The M1's media engine serves 4 tiles at once, the i9's Radeon RX 580 one at a time (it is slower
+with more sessions), while the software decoder scales with the cores: so nitroheic uses the
+hardware on Apple Silicon and one software decoder per core on Intel.
 
 ### Three machines, macOS and Linux
 

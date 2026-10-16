@@ -22,7 +22,7 @@ csempéit párhuzamosan dekódolja, és kettőt a vektoros rajzokhoz:
 | **nitrojpeg** | baseline JPEG | spekulatív párhuzamos Huffman-dekódolás, AVX2 IDCT; bitre egyezik a libjpeg-turbóval | 24 MP-es fotó: **~11 ms** | libjpeg-turbo ~107 ms (1 szálon) |
 | **nitropng** | PNG (8 bites, nem interlaced) | spekulatív párhuzamos inflate (a még ismeretlen adatra mutató visszahivatkozásokat utólag oldja fel, Adler-32-vel ellenőrizve) + „hullámfront” szűrővisszafejtés | 38 valódi PNG: átlag **~43 ms** | Wuffs ~171 ms, ImageIO ~318 ms |
 | **nitropsd** | Photoshop PSD/PSB (8 bites RGB / szürke) | összesített kép: RLE-sorok párhuzamosan, ZIP a nitropng inflate-jével; nagy, rétegekkel teli fájlból csak az összesített képet olvassa be | 24 MP RLE: **~5 ms** | ImageIO ~170 ms |
-| **nitroheic** (macOS) | HEIC (8 bites 4:2:0 HEVC, iPhone-rácsok) | saját HEIF-feldolgozás; egy iPhone-fotó 48 független HEVC-csempéjét a VideoToolbox párhuzamosan bontja ki (Intelen magonként egy szoftveres dekóder, Apple Siliconon 4 szál a médiamotoron) Y/Cb/Cr síkokba a GPU-nak | 12 MP-es iPhone-fotó: **~33 ms** (i9), **~25 ms** (M1) | ImageIO ~200 ms (i9), ~59 ms (M1) |
+| **nitroheic** (macOS) | HEIC (8 bites 4:2:0 HEVC, iPhone-rácsok) | saját HEIF-feldolgozás; egy iPhone-fotó 48 független HEVC-csempéjét a VideoToolbox párhuzamosan bontja ki Y/Cb/Cr síkokba a GPU-nak | 12 MP-es iPhone-fotó: **~33 ms** | ImageIO ~200 ms |
 | **nitrosvg** | SVG (szűrők nélkül) | lunasvg-értelmező + plutovg-renderelő, fontkereséssel a rendszer és a felhasználó fontkönyvtáraiban | 38 MB-os SVG: **~0,53 s** | WebKit ~1,4 s, CoreSVG ~2,4 s |
 | **nitrocdr** | CorelDRAW 5 – X6 (CDR), CMX | saját [libcdr-forkunk](https://github.com/gereoffy/libcdr) sok javítással (szövegstílusok, sorköz, vágás, bitkép-átlátszóság) és kétszer gyorsabb librevenge-dzsel; közvetlenül plutovg-vel rajzol | 17,7 MB-os, csak vektoros CDR: **~1,8 s**, ~3× gyorsabb | eredeti libcdr `cdr2xhtml` ~5,4 s (csak SVG-vé alakítás) |
 
@@ -36,8 +36,8 @@ ms alatt az ImageIO 150–400 ms-a helyett; az elforgatásukat is figyelembe ves
 fotókat (iPhone) a nitroheic (`src/nitroheic.c`) dekódolja: egy iPhone-fotó 48 független HEVC-csempéből
 álló rács, ezeket párhuzamosan bontja ki Y/Cb/Cr síkokba (Intelen magonként egy szoftveres
 VideoToolbox-dekóderrel, Apple Siliconon 4 szálon a médiamotorral), a színkonverzió a GPU-n megy — egy
-12 MP-es kép ~33 ms alatt az ImageIO ~200 ms-a helyett egy Intel i9-en, ~26 ms alatt ~59 ms helyett
-egy M1-en.
+12 MP-es kép ~33 ms alatt az ImageIO ~200 ms-a helyett egy Intel i9-en (M1: lásd lent: „Apple Silicon
+(M1)”).
 A TIFF, WebP, GIF, BMP és a többi HEIC macOS-en az Apple ImageIO-val, Windowson a WIC-kel, Linuxon a GTK betöltőivel nyílik
 meg (lásd lent: „Windows” és „GNOME / Linux”). macOS-en és Windowson vektoros rajzokat is mutat: **SVG**-t
 (lunasvg) és **CorelDRAW** CDR / CMX fájlokat (libcdr, a saját, sok javítást tartalmazó forkunk),
@@ -306,6 +306,21 @@ PNG-hez nincs hardveres dekóder, így az ImageIO mindkét gépen ugyanolyan las
 nitropng 3×-osan gyorsabb a Wuffs-nál és 4×-esen az ImageIO-nál. Az Adler-32 és a
 visszahivatkozások feloldása ott NEON-t használ (x86-on AVX2-t): ez ~100-ról 90 ms-ra gyorsított;
 az idő nagy része a Huffman-dekódolás és a sorszűrők visszafejtése, ezek mindkét gépen sima C-ben futnak.
+
+HEIC (`build/m1test/vtbench`: 20 iPhone-fotó 48 csempéje, 12 MP, a VideoToolbox-szal különféle
+módokon, a dekóderek létrehozásával együtt; az utolsó sor: `nitroview --bench` mind a 155-ön; ms/kép):
+
+| dekóder | M1 | i9 |
+|---|---|---|
+| Apple ImageIO | 58–60 | 176 |
+| VideoToolbox hardveres, 1 szál | 52 | 135 |
+| VideoToolbox hardveres, 4 (M1) / 8 (i9) szál | **24–29** | 224 |
+| VideoToolbox szoftveres, 4 / 8 szál | 62–75 | **42** |
+| **nitroheic** (a viewerben) | **25** | **33** |
+
+Az M1 médiamotorja egyszerre 4 csempét szolgál ki, az i9 melletti Radeon RX 580 egyszerre egyet
+(több szálon lassabb), a szoftveres dekóder pedig a magokkal skálázódik: ezért a nitroheic Apple
+Siliconon a hardvert, Intelen magonként egy szoftveres dekódert használ.
 
 ### Három gép, macOS és Linux
 
