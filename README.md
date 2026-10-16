@@ -14,13 +14,15 @@ GNOME/Linux**:
 | Linux with GNOME | GTK 4 + libadwaita: `nitroview-gnome`, also as a Flatpak | `make gnome` / `make flatpak` |
 
 All three are built on our own decoders: three that decode a *single* image on all CPU cores —
-although JPEG, PNG and PSD compression are all sequential by design — and two for vector drawings:
+although JPEG, PNG and PSD compression are all sequential by design —, one that decodes the tiles of
+HEIC photos in parallel, and two for vector drawings:
 
 | decoder | format | how | time | usual decoders |
 |---|---|---|---|---|
 | **nitrojpeg** | baseline JPEG | speculative parallel Huffman decoding, AVX2 IDCT; bit-exact with libjpeg-turbo | 24 MP photo: **~11 ms** | libjpeg-turbo ~107 ms (1 thread) |
 | **nitropng** | PNG (8-bit, non-interlaced) | speculative parallel inflate (back-references into not yet known data resolved later, Adler-32 verified) + "wavefront" filter reversal | 38 real PNGs: **~43 ms** avg. | Wuffs ~171 ms, ImageIO ~318 ms |
 | **nitropsd** | Photoshop PSD/PSB (8-bit RGB / gray) | merged image: RLE rows in parallel, ZIP via nitropng's inflate; reads only the merged image of huge layered files | 24 MP RLE: **~5 ms** | ImageIO ~170 ms |
+| **nitroheic** (macOS) | HEIC (8-bit 4:2:0 HEVC, iPhone grids) | own HEIF parsing; the 48 independent HEVC tiles of an iPhone photo decoded in parallel by VideoToolbox (Intel: software decoders, one per core; Apple Silicon: 4 sessions on the media engine) into Y/Cb/Cr for the GPU | 12 MP iPhone photo: **~33 ms** (i9), **~25 ms** (M1) | ImageIO ~200 ms (i9), ~59 ms (M1) |
 | **nitrosvg** | SVG (without filters) | lunasvg parser + plutovg renderer, with font lookup in the system and user font folders | 38 MB SVG: **~0.53 s** | WebKit ~1.4 s, CoreSVG ~2.4 s |
 | **nitrocdr** | CorelDRAW 5 – X6 (CDR), CMX | our [libcdr fork](https://github.com/gereoffy/libcdr) with many fixes (text styles, line spacing, clipping, bitmap transparency) and a 2× faster librevenge; draws directly with plutovg | 17.7 MB all-vector CDR: **~1.8 s**, ~3× faster | original libcdr `cdr2xhtml` ~5.4 s (only converting to SVG) |
 

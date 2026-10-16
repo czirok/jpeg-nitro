@@ -14,13 +14,15 @@ Linuxra**:
 | Linux, GNOME | GTK 4 + libadwaita: `nitroview-gnome`, Flatpakként is | `make gnome` / `make flatpak` |
 
 Mindhárom ugyanazokra a saját dekóderekre épül: hármat, amelyek egyetlen képet is az összes CPU-magon
-dekódolnak — pedig a JPEG, a PNG és a PSD tömörítése is eredendően soros —, és kettőt a vektoros rajzokhoz:
+dekódolnak — pedig a JPEG, a PNG és a PSD tömörítése is eredendően soros —, egyet, amely a HEIC-fotók
+csempéit párhuzamosan dekódolja, és kettőt a vektoros rajzokhoz:
 
 | dekóder | formátum | hogyan | idő | szokásos dekóderek |
 |---|---|---|---|---|
 | **nitrojpeg** | baseline JPEG | spekulatív párhuzamos Huffman-dekódolás, AVX2 IDCT; bitre egyezik a libjpeg-turbóval | 24 MP-es fotó: **~11 ms** | libjpeg-turbo ~107 ms (1 szálon) |
 | **nitropng** | PNG (8 bites, nem interlaced) | spekulatív párhuzamos inflate (a még ismeretlen adatra mutató visszahivatkozásokat utólag oldja fel, Adler-32-vel ellenőrizve) + „hullámfront” szűrővisszafejtés | 38 valódi PNG: átlag **~43 ms** | Wuffs ~171 ms, ImageIO ~318 ms |
 | **nitropsd** | Photoshop PSD/PSB (8 bites RGB / szürke) | összesített kép: RLE-sorok párhuzamosan, ZIP a nitropng inflate-jével; nagy, rétegekkel teli fájlból csak az összesített képet olvassa be | 24 MP RLE: **~5 ms** | ImageIO ~170 ms |
+| **nitroheic** (macOS) | HEIC (8 bites 4:2:0 HEVC, iPhone-rácsok) | saját HEIF-feldolgozás; egy iPhone-fotó 48 független HEVC-csempéjét a VideoToolbox párhuzamosan bontja ki (Intelen magonként egy szoftveres dekóder, Apple Siliconon 4 szál a médiamotoron) Y/Cb/Cr síkokba a GPU-nak | 12 MP-es iPhone-fotó: **~33 ms** (i9), **~25 ms** (M1) | ImageIO ~200 ms (i9), ~59 ms (M1) |
 | **nitrosvg** | SVG (szűrők nélkül) | lunasvg-értelmező + plutovg-renderelő, fontkereséssel a rendszer és a felhasználó fontkönyvtáraiban | 38 MB-os SVG: **~0,53 s** | WebKit ~1,4 s, CoreSVG ~2,4 s |
 | **nitrocdr** | CorelDRAW 5 – X6 (CDR), CMX | saját [libcdr-forkunk](https://github.com/gereoffy/libcdr) sok javítással (szövegstílusok, sorköz, vágás, bitkép-átlátszóság) és kétszer gyorsabb librevenge-dzsel; közvetlenül plutovg-vel rajzol | 17,7 MB-os, csak vektoros CDR: **~1,8 s**, ~3× gyorsabb | eredeti libcdr `cdr2xhtml` ~5,4 s (csak SVG-vé alakítás) |
 
