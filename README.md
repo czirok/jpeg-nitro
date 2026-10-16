@@ -290,7 +290,7 @@ faster than Wuffs and 4× faster than ImageIO. Its Adler-32 and back-reference r
 there (AVX2 on x86): that took it from ~100 to 90 ms; most of the time is Huffman decoding
 and the row filters, which are plain C on both.
 
-HEIC (`build/m1test/vtbench`: the 48 tiles of 20 iPhone photos, 12 MP, through VideoToolbox in
+HEIC (a small test program, not in the repository: the 48 tiles of 20 iPhone photos, 12 MP, through VideoToolbox in
 different ways, decoder sessions included; the last row: `nitroview --bench` on all 155; ms/image):
 
 | decoder | M1 | i9 |

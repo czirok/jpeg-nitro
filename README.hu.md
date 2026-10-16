@@ -307,7 +307,7 @@ nitropng 3×-osan gyorsabb a Wuffs-nál és 4×-esen az ImageIO-nál. Az Adler-3
 visszahivatkozások feloldása ott NEON-t használ (x86-on AVX2-t): ez ~100-ról 90 ms-ra gyorsított;
 az idő nagy része a Huffman-dekódolás és a sorszűrők visszafejtése, ezek mindkét gépen sima C-ben futnak.
 
-HEIC (`build/m1test/vtbench`: 20 iPhone-fotó 48 csempéje, 12 MP, a VideoToolbox-szal különféle
+HEIC (egy kis tesztprogrammal, ami nincs a repóban: 20 iPhone-fotó 48 csempéje, 12 MP, a VideoToolbox-szal különféle
 módokon, a dekóderek létrehozásával együtt; az utolsó sor: `nitroview --bench` mind a 155-ön; ms/kép):
 
 | dekóder | M1 | i9 |
