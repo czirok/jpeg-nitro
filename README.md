@@ -28,7 +28,10 @@ Times on an Intel i9. The decoders are fast on ARM too (NEON): on a 2020 M1 MacB
 used on their own ([Using the decoders](#using-the-decoders)). Photo series such as timelapses can be "played
 back" at full resolution in real time, up to 60 images/s. HEIC, TIFF, WebP, GIF and BMP open
 through Apple ImageIO on macOS, WIC on Windows and GTK's loaders on Linux (see **Windows** and
-**GNOME / Linux** below). (The name: racing cars boost the turbo with nitro.)
+**GNOME / Linux** below). On macOS it also shows vector drawings, **SVG** (lunasvg) and
+**CorelDRAW** CDR / CMX (libcdr, our fork with many fixes), sharp at any zoom and paging as fast
+as photos (see **SVG** and **CorelDRAW** below); the GNOME viewer shows SVG through GTK.
+(The name: racing cars boost the turbo with nitro.)
 
 Developed and measured on an Intel x86-64 Mac (i9 13th gen, 8 cores / 16 threads, AMD RX 580).
 Also runs on Apple Silicon (M1 MacBook Air, see [below](#apple-silicon-m1)); there the IDCT uses NEON instead of AVX2.

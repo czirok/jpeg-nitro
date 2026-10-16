@@ -28,7 +28,10 @@ Apple hardveres JPEG-dekódere (lásd lent: „Apple Silicon (M1)”). A dekóde
 C-fájlok, önállóan is használhatók. A fotósorozatok (pl.
 timelapse) teljes felbontásban, valós időben „lejátszhatók”, akár 60 kép/s-mal. A HEIC, TIFF,
 WebP, GIF és BMP macOS-en az Apple ImageIO-val, Windowson a WIC-kel, Linuxon a GTK betöltőivel nyílik
-meg (lásd lent: „Windows” és „GNOME / Linux”).
+meg (lásd lent: „Windows” és „GNOME / Linux”). macOS-en vektoros rajzokat is mutat: **SVG**-t
+(lunasvg) és **CorelDRAW** CDR / CMX fájlokat (libcdr, a saját, sok javítást tartalmazó forkunk),
+bármekkora nagyításban élesen, és ugyanolyan gyors lapozással, mint a fotóknál (lásd lent: „SVG” és
+„CorelDRAW”); a GNOME-os változat az SVG-t a GTK-val jeleníti meg.
 A név utalás: versenyautókban a turbót nitróval gyorsítják tovább.
 
 Intel x86-64 Macen (i9, 13. gen., 8 mag / 16 szál, AMD RX 580) fejlesztve és mérve.
