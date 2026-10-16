@@ -18,7 +18,22 @@ libcdr fixes for nitroview (scripts/get-deps.sh applies this after downloading):
   first page before the drawing
 - text records of CorelDRAW 7-X5 with a style whose 0x20 field is a single zero byte lost
   their text (the byte was not skipped)
+- bitmaps with a transparent background keep it: the 8-bit mask that follows the image
+  becomes its alpha (it was dropped, the masked out pixels showed, often black)
 
+diff --git a/src/lib/CDRCollector.h b/src/lib/CDRCollector.h
+index 7acad54..7dd8ef2 100644
+--- a/src/lib/CDRCollector.h
++++ b/src/lib/CDRCollector.h
+@@ -85,6 +85,8 @@ public:
+   virtual void collectBmp(unsigned imageId, unsigned colorModel, unsigned width, unsigned height, unsigned bpp, const std::vector<unsigned> &palette, const std::vector<unsigned char> &bitmap) = 0;
+   virtual void collectBmp(unsigned imageId, const std::vector<unsigned char> &bitmap) = 0;
+   virtual void collectBmpf(unsigned patternId, unsigned width, unsigned height, const std::vector<unsigned char> &pattern) = 0;
++  // the transparency mask of the bitmap collected next (8 bits per pixel, rows as in the bitmap)
++  virtual void collectBmpMask(unsigned /* imageId */, unsigned /* width */, unsigned /* height */, const std::vector<unsigned char> & /* mask */) {}
+   virtual void collectPpdt(const std::vector<std::pair<double, double> > &points, const std::vector<unsigned> &knotVector) = 0;
+   virtual void collectFillTransform(const CDRTransforms &fillTrafos) = 0;
+   virtual void collectFillOpacity(double opacity) = 0;
 diff --git a/src/lib/CDRContentCollector.cpp b/src/lib/CDRContentCollector.cpp
 index e8e0291..64d2369 100644
 --- a/src/lib/CDRContentCollector.cpp
@@ -192,7 +207,7 @@ index c1ccd2a..5ce0278 100644
  #define CDR_FOURCC_LIST 0x5453494c
  #define CDR_FOURCC_lnkg 0x676b6e6c
 diff --git a/src/lib/CDRParser.cpp b/src/lib/CDRParser.cpp
-index 7690725..ce1e227 100644
+index 7690725..5ac5278 100644
 --- a/src/lib/CDRParser.cpp
 +++ b/src/lib/CDRParser.cpp
 @@ -121,6 +121,7 @@ static int parseColourString(const char *colourString, libcdr::CDRColor &colour,
@@ -282,7 +297,40 @@ index 7690725..ce1e227 100644
    m_collector->collectFlags(flags, m_version >= 400);
  }
  
-@@ -2605,7 +2636,15 @@ void libcdr::CDRParser::readTxsm(librevenge::RVNGInputStream *input, unsigned le
+@@ -1944,6 +1975,7 @@ void libcdr::CDRParser::readBmp(librevenge::RVNGInputStream *input, unsigned len
+ {
+   if (!_redirectX6Chunk(&input, length))
+     throw GenericException();
++  const long bmpStart = input->tell();
+   unsigned imageId = readUnsigned(input);
+   std::vector<unsigned char> bitmap;
+   if (m_version < 500)
+@@ -1972,6 +2004,24 @@ void libcdr::CDRParser::readBmp(librevenge::RVNGInputStream *input, unsigned len
+   unsigned colorModel, width, height, bpp;
+   std::vector<unsigned> palette;
+   readRImage(colorModel, width, height, bpp, palette, bitmap, input);
++  // a bitmap with a transparent background: an 8-bit image of the same size follows, its mask
++  if (!bitmap.empty() && input->tell() + 14 + 64 < bmpStart + (long)length && readU8(input) == 0x52 && readU8(input) == 0x49)
++  {
++    // (the header of readRImage, but no palette)
++    input->seek(12 + 8, librevenge::RVNG_SEEK_CUR);
++    unsigned maskWidth = readU32(input);
++    unsigned maskHeight = readU32(input);
++    input->seek(4, librevenge::RVNG_SEEK_CUR);
++    unsigned maskBpp = readU32(input);
++    input->seek(4, librevenge::RVNG_SEEK_CUR);
++    unsigned maskSize = readU32(input);
++    input->seek(32, librevenge::RVNG_SEEK_CUR);
++    unsigned long numBytesRead = 0;
++    const unsigned char *maskData = maskSize ? input->read(maskSize, numBytesRead) : nullptr;
++    if (maskData && numBytesRead == maskSize && maskWidth == width && maskHeight == height && maskBpp == 8 &&
++        height && maskSize / height >= width)
++      m_collector->collectBmpMask(imageId, width, height, std::vector<unsigned char>(maskData, maskData + maskSize));
++  }
+   m_collector->collectBmp(imageId, colorModel, width, height, bpp, palette, bitmap);
+ }
+ 
+@@ -2605,7 +2655,15 @@ void libcdr::CDRParser::readTxsm(librevenge::RVNGInputStream *input, unsigned le
              style.m_charSet = charSet;
          }
          if (fl2&2) // Bold/Italic, etc.
@@ -299,7 +347,7 @@ index 7690725..ce1e227 100644
          if (fl2&4) // Font Size
            style.m_fontSize = readCoordinate(input);
          if (fl2&8) // assumption
-@@ -2642,10 +2681,12 @@ void libcdr::CDRParser::readTxsm(librevenge::RVNGInputStream *input, unsigned le
+@@ -2642,10 +2700,12 @@ void libcdr::CDRParser::readTxsm(librevenge::RVNGInputStream *input, unsigned le
          }
          if (fl3&0x20) // Something
          {
@@ -313,7 +361,7 @@ index 7690725..ce1e227 100644
              input->seek(4, librevenge::RVNG_SEEK_CUR); // ftil fild Id
              if (m_version >= 1500)
                input->seek(48, librevenge::RVNG_SEEK_CUR);
-@@ -2989,7 +3030,9 @@ void libcdr::CDRParser::readTxsm5(librevenge::RVNGInputStream *input)
+@@ -2989,7 +3049,9 @@ void libcdr::CDRParser::readTxsm5(librevenge::RVNGInputStream *input)
        input->seek(4, librevenge::RVNG_SEEK_CUR);
        textData.push_back(readU8(input));
        input->seek(1, librevenge::RVNG_SEEK_CUR);
@@ -324,7 +372,7 @@ index 7690725..ce1e227 100644
      }
      if (!textData.empty())
        m_collector->collectText(textId, stlId, textData, charDescriptions, styles);
-@@ -3194,6 +3237,9 @@ void libcdr::CDRParser::_readX6StyleString(librevenge::RVNGInputStream *input, u
+@@ -3194,6 +3256,9 @@ void libcdr::CDRParser::_readX6StyleString(librevenge::RVNGInputStream *input, u
      boost::optional<unsigned> fontSize = pt.get_optional<unsigned>("character.latin.size");
      if (!!fontSize)
        style.m_fontSize = (double)fontSize.get() / 254000.0;
@@ -346,6 +394,68 @@ index b14f100..441d100 100644
 +  bool m_layerFlagsPending;
 +  bool m_skipLayer;
  
+ };
+ 
+diff --git a/src/lib/CDRStylesCollector.cpp b/src/lib/CDRStylesCollector.cpp
+index daeb295..008b417 100644
+--- a/src/lib/CDRStylesCollector.cpp
++++ b/src/lib/CDRStylesCollector.cpp
+@@ -26,6 +26,14 @@ libcdr::CDRStylesCollector::~CDRStylesCollector()
+ {
+ }
+ 
++void libcdr::CDRStylesCollector::collectBmpMask(unsigned imageId, unsigned width, unsigned height, const std::vector<unsigned char> &mask)
++{
++  m_maskId = imageId;
++  m_maskWidth = width;
++  m_maskHeight = height;
++  m_mask = mask;
++}
++
+ void libcdr::CDRStylesCollector::collectBmp(unsigned imageId, unsigned colorModel, unsigned width, unsigned height, unsigned bpp, const std::vector<unsigned> &palette, const std::vector<unsigned char> &bitmap)
+ {
+   libcdr::CDRInternalStream stream(bitmap);
+@@ -156,6 +164,21 @@ void libcdr::CDRStylesCollector::collectBmp(unsigned imageId, unsigned colorMode
+     }
+ #endif
+ 
++    // a transparency mask: its values become the alpha of the pixels (left 0 otherwise,
++    // which BMP readers take as an opaque image)
++    if (m_maskId == imageId && m_maskWidth == width && m_maskHeight == height && height &&
++        m_mask.size() / height >= width && image.size() == 54 + (unsigned long)width * height * 4)
++    {
++      std::vector<unsigned char> pixels(image.getDataBuffer(), image.getDataBuffer() + image.size());
++      const unsigned long maskStride = m_mask.size() / height;
++      for (unsigned j = 0; j < height; ++j)
++        for (unsigned k = 0; k < width; ++k)
++          pixels[54 + ((unsigned long)j * width + k) * 4 + 3] = m_mask[j * maskStride + k];
++      image = librevenge::RVNGBinaryData(&pixels[0], pixels.size());
++    }
++    m_mask.clear();
++    m_maskId = 0;
++
+     m_ps.m_bmps[imageId] = image;
+   }
+ }
+diff --git a/src/lib/CDRStylesCollector.h b/src/lib/CDRStylesCollector.h
+index 00039ce..ef644e3 100644
+--- a/src/lib/CDRStylesCollector.h
++++ b/src/lib/CDRStylesCollector.h
+@@ -52,6 +52,7 @@ public:
+   void collectBmp(unsigned imageId, unsigned colorModel, unsigned width, unsigned height, unsigned bpp, const std::vector<unsigned> &palette, const std::vector<unsigned char> &bitmap) override;
+   void collectBmp(unsigned imageId, const std::vector<unsigned char> &bitmap) override;
+   void collectBmpf(unsigned patternId, unsigned width, unsigned height, const std::vector<unsigned char> &pattern) override;
++  void collectBmpMask(unsigned imageId, unsigned width, unsigned height, const std::vector<unsigned char> &mask) override;
+   void collectPpdt(const std::vector<std::pair<double, double> > &, const std::vector<unsigned> &) override {}
+   void collectFillTransform(const CDRTransforms &) override {}
+   void collectFillOpacity(double) override {}
+@@ -74,6 +75,8 @@ private:
+   CDRStylesCollector &operator=(const CDRStylesCollector &);
+ 
+   CDRParserState &m_ps;
++  unsigned m_maskId = 0, m_maskWidth = 0, m_maskHeight = 0;
++  std::vector<unsigned char> m_mask;
+   CDRPage m_page;
  };
  
 diff --git a/src/lib/CDRTypes.h b/src/lib/CDRTypes.h
