@@ -413,7 +413,7 @@ static uint32_t tiff_tag(const uint8_t *d, size_t len, int le, uint32_t ifd, uns
     #undef T16
 }
 
-int nj_find_embedded(const uint8_t *data, size_t len, size_t *offset, size_t *size, int *orientation, int *adobe_rgb) {
+int nj_find_embedded(const uint8_t *data, size_t len, size_t *offset, size_t *size, int *orientation) {
     // TIFF header ("II*\0" or "MM\0*") + "CR": a Canon CR2
     if (len < 16 || !(data[0] == data[1] && (data[0] == 'I' || data[0] == 'M')) || data[8] != 'C' || data[9] != 'R')
         return -1;
@@ -424,16 +424,11 @@ int nj_find_embedded(const uint8_t *data, size_t len, size_t *offset, size_t *si
     uint32_t cnt = tiff_tag(data, len, le, ifd0, 0x117);   // StripByteCounts
     uint32_t orient = tiff_tag(data, len, le, ifd0, 0x112);
     if (!off || cnt < 4 || off > len - 2 || data[off] != 0xFF || data[off + 1] != 0xD8) return -1;
-    // colour space: Canon's own setting (maker note tag 0xB4: 1 sRGB, 2 Adobe RGB), else the EXIF
-    // ColorSpace (0xFFFF "uncalibrated": what cameras write for Adobe RGB)
-    uint32_t exif = tiff_tag(data, len, le, ifd0, 0x8769);
-    uint32_t note = exif ? tiff_tag(data, len, le, exif, 0x927C) : 0;
-    uint32_t canon = note ? tiff_tag(data, len, le, note, 0xB4) : 0;
-    uint32_t cs = exif ? tiff_tag(data, len, le, exif, 0xA001) : 0;
+    // (it is sRGB even when the camera is set to Adobe RGB: compared with the raw data, the
+    // previews of such files look like those of sRGB ones only when shown as sRGB)
     *offset = off;
     *size = cnt;
     *orientation = orient >= 1 && orient <= 8 ? (int)orient : 1;
-    *adobe_rgb = canon ? canon == 2 : cs == 0xFFFF;
     return 0;
 }
 
