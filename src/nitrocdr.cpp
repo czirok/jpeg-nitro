@@ -106,6 +106,7 @@ struct Style {
 struct Span {
     plutovg_font_face_t *face = nullptr;   // owned by the font cache
     float size = 12;
+    float scaleX = 1;   // horizontal stretch (CorelDRAW text squeezed to fit, style:text-scale)
     Color color;
     std::string text;
     float width = 0;
@@ -345,6 +346,8 @@ public:
     void openSpan(const RVNGPropertyList &p) override {
         m_span = Span();
         m_span.size = (float)points(p["fo:font-size"], 12.0);
+        double sx = number(p["style:text-scale"], 1.0);
+        if (sx > 0.01 && sx < 100) m_span.scaleX = (float)sx;
         m_span.color = color(p["fo:color"]);
         std::string font = p["style:font-name"] ? p["style:font-name"]->getStr().cstr() : "Arial";
         std::lock_guard<std::mutex> g(g_lock);
@@ -453,7 +456,7 @@ private:
             l.ascent = 0;
             for (Span &s : l.spans) {
                 s.width = s.face ? plutovg_font_face_text_extents(s.face, s.size, s.text.data(), (int)s.text.size(),
-                                                                  PLUTOVG_TEXT_ENCODING_UTF8, nullptr)
+                                                                  PLUTOVG_TEXT_ENCODING_UTF8, nullptr) * s.scaleX
                                  : 0;
                 l.width += s.width;
                 l.size = std::max(l.size, s.size);
@@ -646,7 +649,14 @@ void drawItem(plutovg_canvas_t *c, const Item &it, float scale) {
                 if (s.face) {
                     plutovg_canvas_set_font(c, s.face, s.size);
                     setColor(c, s.color, 1);
-                    plutovg_canvas_fill_text(c, s.text.data(), (int)s.text.size(), PLUTOVG_TEXT_ENCODING_UTF8, x, base);
+                    if (s.scaleX != 1) {
+                        plutovg_canvas_save(c);
+                        plutovg_canvas_translate(c, x, base);
+                        plutovg_canvas_scale(c, s.scaleX, 1);
+                        plutovg_canvas_fill_text(c, s.text.data(), (int)s.text.size(), PLUTOVG_TEXT_ENCODING_UTF8, 0, 0);
+                        plutovg_canvas_restore(c);
+                    } else
+                        plutovg_canvas_fill_text(c, s.text.data(), (int)s.text.size(), PLUTOVG_TEXT_ENCODING_UTF8, x, base);
                 }
                 x += s.width;
             }

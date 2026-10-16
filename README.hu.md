@@ -120,7 +120,7 @@ szkennelések és fotók bitképként maradnak a memóriában. A megjelenített 
 a fájlban beállított lapméret, így egy kis logó is kitölti az ablakot. A lapozás, a nagyítás és az éles részlet úgy
 megy, mint az SVG-nél (többoldalas dokumentumból egyelőre csak az első oldal). A
 `patches/libcdr.patch` ehhez javítja a libcdr-t: a nyitott vonalak nincsenek kitöltve, a szöveg
-megtartja a forgatását és a valódi kezdőpontjára kerül, a `CMYK100` színek (CorelDRAW 2022) nem
+megtartja a forgatását és a vízszintes nyújtását, és a valódi kezdőpontjára kerül, a `CMYK100` színek (CorelDRAW 2022) nem
 fehérek, a rejtett rétegek elemei kimaradnak (egy importált PDF a kikapcsolt rétegeit rejtett
 rétegként tartja meg), és az ICU helyett iconv dolgozik (kódlapok; karakterkészlet nélkül
 windows-1250, ha a szövegben ő/ű van); a `patches/librevenge.patch` a beágyazott képeket base64

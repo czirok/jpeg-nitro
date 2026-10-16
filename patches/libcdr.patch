@@ -10,15 +10,37 @@ libcdr fixes for nitroview (scripts/get-deps.sh applies this after downloading):
   text has o/u with double acute, else windows-1252
 - CorelDRAW 5 texts (one byte per character) were read as UTF-16
 - CorelDRAW 5 bitmaps came out turned by 180 degrees
+- artistic text stretched or squeezed in CorelDRAW keeps that scaling (style:text-scale on
+  its spans, the font size times the vertical scale, not rounded to half points)
 
 diff --git a/src/lib/CDRContentCollector.cpp b/src/lib/CDRContentCollector.cpp
-index e8e0291..585d02b 100644
+index e8e0291..366801f 100644
 --- a/src/lib/CDRContentCollector.cpp
 +++ b/src/lib/CDRContentCollector.cpp
-@@ -213,6 +213,22 @@ void libcdr::CDRContentCollector::collectPath(const CDRPath &path)
+@@ -213,6 +213,42 @@ void libcdr::CDRContentCollector::collectPath(const CDRPath &path)
    m_currentPath.appendPath(path);
  }
  
++// The lengths of the current object's x and y axes on the output page: an artistic text
++// stretched or squeezed in CorelDRAW keeps its font size and gets this scaling.
++void libcdr::CDRContentCollector::_textScale(double &sx, double &sy)
++{
++  double ox = 0.0, oy = 0.0, ux = 1.0, uy = 0.0, vx = 0.0, vy = 1.0;
++  m_currentTransforms.applyToPoint(ox, oy);
++  m_currentTransforms.applyToPoint(ux, uy);
++  m_currentTransforms.applyToPoint(vx, vy);
++  if (!m_groupTransforms.empty())
++  {
++    m_groupTransforms.top().applyToPoint(ox, oy);
++    m_groupTransforms.top().applyToPoint(ux, uy);
++    m_groupTransforms.top().applyToPoint(vx, vy);
++  }
++  sx = hypot(ux - ox, uy - oy);
++  sy = hypot(vx - ox, vy - oy);
++  if (CDR_ALMOST_ZERO(sx) || CDR_ALMOST_ZERO(sy))
++    sx = sy = 1.0;
++}
++
 +// The rotation of the current object's x axis on the output page (y down), in degrees.
 +double libcdr::CDRContentCollector::_textRotation()
 +{
@@ -38,7 +60,7 @@ index e8e0291..585d02b 100644
  void libcdr::CDRContentCollector::_flushCurrentPath()
  {
    CDR_DEBUG_MSG(("CDRContentCollector::_flushCurrentPath\n"));
-@@ -238,7 +254,6 @@ void libcdr::CDRContentCollector::_flushCurrentPath()
+@@ -238,7 +274,6 @@ void libcdr::CDRContentCollector::_flushCurrentPath()
      librevenge::RVNGPropertyList style;
      _fillProperties(style);
      _lineProperties(style);
@@ -46,7 +68,7 @@ index e8e0291..585d02b 100644
      m_currentPath.transform(m_currentTransforms);
      if (!m_groupTransforms.empty())
        m_currentPath.transform(m_groupTransforms.top());
-@@ -336,6 +351,14 @@ void libcdr::CDRContentCollector::_flushCurrentPath()
+@@ -336,6 +371,14 @@ void libcdr::CDRContentCollector::_flushCurrentPath()
        else
          tmpPath.pop_back();
      }
@@ -61,11 +83,12 @@ index e8e0291..585d02b 100644
      if (!tmpPath.empty())
      {
        librevenge::RVNGPropertyListVector outputPath;
-@@ -422,15 +445,44 @@ void libcdr::CDRContentCollector::_flushCurrentPath()
+@@ -422,15 +465,46 @@ void libcdr::CDRContentCollector::_flushCurrentPath()
      double y1 = m_currentTextBox.m_y;
      double x2 = m_currentTextBox.m_x + m_currentTextBox.m_w;
      double y2 = m_currentTextBox.m_y - m_currentTextBox.m_h;
 +    double rotate = 0.0;   // the text frame's rotation (degrees, as for images)
++    double scaleX = 1.0, scaleY = 1.0;   // artistic text stretched by its transform
      if (!CDR_ALMOST_ZERO(m_currentTextBox.m_h) && !CDR_ALMOST_ZERO(m_currentTextBox.m_w))
      {
 +      // three corners of the frame (top left, top right, bottom left): its centre, size and
@@ -96,6 +119,7 @@ index e8e0291..585d02b 100644
 +      // artistic text (no frame): anchored at its transformed origin (the first line's baseline
 +      // at the alignment point), turned around it; the bounding box only approximated that
 +      rotate = _textRotation();
++      _textScale(scaleX, scaleY);
 +      x1 = 0.0;
 +      y1 = 0.0;
        m_currentTransforms.applyToPoint(x1, y1);
@@ -110,7 +134,7 @@ index e8e0291..585d02b 100644
      }
      else if (!CDR_ALMOST_ZERO(m_currentBBox.getWidth()) && !CDR_ALMOST_ZERO(m_currentBBox.getHeight()))
      {
-@@ -476,6 +528,8 @@ void libcdr::CDRContentCollector::_flushCurrentPath()
+@@ -476,6 +550,8 @@ void libcdr::CDRContentCollector::_flushCurrentPath()
      textFrameProps.insert("svg:height", fabs(y2-y1));
      textFrameProps.insert("svg:x", x1);
      textFrameProps.insert("svg:y", y1);
@@ -119,15 +143,28 @@ index e8e0291..585d02b 100644
      textFrameProps.insert("fo:padding-top", 0.0);
      textFrameProps.insert("fo:padding-bottom", 0.0);
      textFrameProps.insert("fo:padding-left", 0.0);
+@@ -522,6 +598,11 @@ void libcdr::CDRContentCollector::_flushCurrentPath()
+         {
+           librevenge::RVNGPropertyList spanProps;
+           double fontSize = (double)cdr_round(144.0*j.m_style.m_fontSize) / 2.0;
++          if (!CDR_ALMOST_EQUAL(scaleY, 1.0) || !CDR_ALMOST_EQUAL(scaleX, 1.0))   // stretched artistic text
++          {
++            fontSize = (double)cdr_round(7200.0*j.m_style.m_fontSize*scaleY) / 100.0;
++            spanProps.insert("style:text-scale", scaleX / scaleY, librevenge::RVNG_PERCENT);
++          }
+           spanProps.insert("fo:font-size", fontSize, librevenge::RVNG_POINT);
+           if (j.m_style.m_fontName.len())
+             spanProps.insert("style:font-name", j.m_style.m_fontName);
 diff --git a/src/lib/CDRContentCollector.h b/src/lib/CDRContentCollector.h
-index 2eae18c..74f5544 100644
+index 2eae18c..6e388c4 100644
 --- a/src/lib/CDRContentCollector.h
 +++ b/src/lib/CDRContentCollector.h
-@@ -82,6 +82,7 @@ private:
+@@ -82,6 +82,8 @@ private:
    void _startPage(double width, double height);
    void _endPage();
    void _flushCurrentPath();
 +  double _textRotation();
++  void _textScale(double &sx, double &sy);
  
    void _fillProperties(librevenge::RVNGPropertyList &propList);
    void _lineProperties(librevenge::RVNGPropertyList &propList);
