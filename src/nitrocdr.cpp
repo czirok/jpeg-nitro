@@ -155,10 +155,9 @@ bool ends_with(const std::string &s, const char *t) {
 
 // CorelDRAW font names: "Arial", "Arial CE" (Central European variants of old fonts),
 // "Times New Roman Bold" ... -> a face of the system fonts, falling back to Arial / Helvetica.
-plutovg_font_face_t *find_font(const std::string &name) {
+plutovg_font_face_t *find_font(const std::string &name, bool bold, bool italic) {
     plutovg_font_face_cache_t *cache = font_cache();
     std::string family = name;
-    bool bold = false, italic = false;
     for (bool changed = true; changed;) {
         changed = false;
         static const char *const suffixes[] = {" CE", " Cyr", " Baltic", " Greek", " Tur"};
@@ -173,10 +172,10 @@ plutovg_font_face_t *find_font(const std::string &name) {
     }
     const char *tries[] = {name.c_str(), family.c_str(), "Arial", "Helvetica"};
     for (int k = 0; k < 4; k++) {
-        plutovg_font_face_t *f = plutovg_font_face_cache_get(cache, tries[k], k ? bold : false, k ? italic : false);
+        plutovg_font_face_t *f = plutovg_font_face_cache_get(cache, tries[k], bold, italic);
         if (f) return f;
     }
-    return nullptr;
+    return nullptr;   // (a family without that style gives its closest face)
 }
 
 // --- the painter -------------------------------------------------------------
@@ -294,6 +293,12 @@ public:
         std::unique_ptr<Text> t = std::move(m_text);
         while (!t->lines.empty() && t->lines.back().spans.empty()) t->lines.pop_back();
         if (t->lines.empty() || !m_inPage || m_inMaster) return;
+        // only spaces: nothing to draw (left-over texts far off the drawing would stretch its bounding box)
+        bool blank = true;
+        for (const Line &l : t->lines)
+            for (const Span &sp : l.spans)
+                if (sp.text.find_first_not_of(" \t\xC2\xA0") != std::string::npos) blank = false;
+        if (blank) return;
         Item it;
         it.kind = Item::TEXT;
         it.text = std::move(t);
@@ -351,7 +356,7 @@ public:
         m_span.color = color(p["fo:color"]);
         std::string font = p["style:font-name"] ? p["style:font-name"]->getStr().cstr() : "Arial";
         std::lock_guard<std::mutex> g(g_lock);
-        m_span.face = find_font(font);
+        m_span.face = find_font(font, is(p, "fo:font-weight", "bold"), is(p, "fo:font-style", "italic"));
     }
     void closeSpan() override {}
     void openLink(const RVNGPropertyList &) override {}

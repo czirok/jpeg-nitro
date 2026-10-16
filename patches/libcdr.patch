@@ -12,9 +12,11 @@ libcdr fixes for nitroview (scripts/get-deps.sh applies this after downloading):
 - CorelDRAW 5 bitmaps came out turned by 180 degrees
 - artistic text stretched or squeezed in CorelDRAW keeps that scaling (style:text-scale on
   its spans, the font size times the vertical scale, not rounded to half points)
+- bold text is marked (fo:font-weight): "weight" 4096 in the style strings of CorelDRAW X6+,
+  font style 0x1000 (0x80 in CorelDRAW 9) in older text records
 
 diff --git a/src/lib/CDRContentCollector.cpp b/src/lib/CDRContentCollector.cpp
-index e8e0291..366801f 100644
+index e8e0291..64d2369 100644
 --- a/src/lib/CDRContentCollector.cpp
 +++ b/src/lib/CDRContentCollector.cpp
 @@ -213,6 +213,42 @@ void libcdr::CDRContentCollector::collectPath(const CDRPath &path)
@@ -143,7 +145,7 @@ index e8e0291..366801f 100644
      textFrameProps.insert("fo:padding-top", 0.0);
      textFrameProps.insert("fo:padding-bottom", 0.0);
      textFrameProps.insert("fo:padding-left", 0.0);
-@@ -522,6 +598,11 @@ void libcdr::CDRContentCollector::_flushCurrentPath()
+@@ -522,9 +598,16 @@ void libcdr::CDRContentCollector::_flushCurrentPath()
          {
            librevenge::RVNGPropertyList spanProps;
            double fontSize = (double)cdr_round(144.0*j.m_style.m_fontSize) / 2.0;
@@ -155,6 +157,11 @@ index e8e0291..366801f 100644
            spanProps.insert("fo:font-size", fontSize, librevenge::RVNG_POINT);
            if (j.m_style.m_fontName.len())
              spanProps.insert("style:font-name", j.m_style.m_fontName);
++          if (j.m_style.m_fontWeight == 700)
++            spanProps.insert("fo:font-weight", "bold");
+           if (j.m_style.m_fillStyle.fillType != (unsigned short)-1)
+             spanProps.insert("fo:color", m_ps.getRGBColorString(j.m_style.m_fillStyle.color1));
+           outputElement.addOpenSpan(spanProps);
 diff --git a/src/lib/CDRContentCollector.h b/src/lib/CDRContentCollector.h
 index 2eae18c..6e388c4 100644
 --- a/src/lib/CDRContentCollector.h
@@ -169,7 +176,7 @@ index 2eae18c..6e388c4 100644
    void _fillProperties(librevenge::RVNGPropertyList &propList);
    void _lineProperties(librevenge::RVNGPropertyList &propList);
 diff --git a/src/lib/CDRParser.cpp b/src/lib/CDRParser.cpp
-index 7690725..73844d0 100644
+index 7690725..7b80053 100644
 --- a/src/lib/CDRParser.cpp
 +++ b/src/lib/CDRParser.cpp
 @@ -121,6 +121,7 @@ static int parseColourString(const char *colourString, libcdr::CDRColor &colour,
@@ -245,7 +252,24 @@ index 7690725..73844d0 100644
    m_collector->collectFlags(flags, m_version >= 400);
  }
  
-@@ -2989,7 +3013,9 @@ void libcdr::CDRParser::readTxsm5(librevenge::RVNGInputStream *input)
+@@ -2605,7 +2629,15 @@ void libcdr::CDRParser::readTxsm(librevenge::RVNGInputStream *input, unsigned le
+             style.m_charSet = charSet;
+         }
+         if (fl2&2) // Bold/Italic, etc.
+-          input->seek(4, librevenge::RVNG_SEEK_CUR);
++        {
++          // the font style: bold is 0x80 in CorelDRAW 9 files, 0x1000 from version 10 on
++          // (as the "weight" of the later style strings); other values are left alone
++          unsigned fontStyle = readU32(input) & 0xffff;
++          if (fontStyle == (m_version < 1000 ? 0x80 : 0x1000))
++            style.m_fontWeight = 700;
++          else if (fontStyle == 0x40)
++            style.m_fontWeight = 400;
++        }
+         if (fl2&4) // Font Size
+           style.m_fontSize = readCoordinate(input);
+         if (fl2&8) // assumption
+@@ -2989,7 +3021,9 @@ void libcdr::CDRParser::readTxsm5(librevenge::RVNGInputStream *input)
        input->seek(4, librevenge::RVNG_SEEK_CUR);
        textData.push_back(readU8(input));
        input->seek(1, librevenge::RVNG_SEEK_CUR);
@@ -256,6 +280,16 @@ index 7690725..73844d0 100644
      }
      if (!textData.empty())
        m_collector->collectText(textId, stlId, textData, charDescriptions, styles);
+@@ -3194,6 +3228,9 @@ void libcdr::CDRParser::_readX6StyleString(librevenge::RVNGInputStream *input, u
+     boost::optional<unsigned> fontSize = pt.get_optional<unsigned>("character.latin.size");
+     if (!!fontSize)
+       style.m_fontSize = (double)fontSize.get() / 254000.0;
++    boost::optional<unsigned> fontWeight = pt.get_optional<unsigned>("character.latin.weight");
++    if (!!fontWeight)   // 64 normal, 4096 bold
++      style.m_fontWeight = fontWeight.get() & 0x1000 ? 700 : 400;
+ 
+     if (!!pt.get_child_optional("character.outline"))
+     {
 diff --git a/src/lib/CDRParser.h b/src/lib/CDRParser.h
 index b14f100..441d100 100644
 --- a/src/lib/CDRParser.h
@@ -270,6 +304,36 @@ index b14f100..441d100 100644
  
  };
  
+diff --git a/src/lib/CDRTypes.h b/src/lib/CDRTypes.h
+index 6225a62..7470143 100644
+--- a/src/lib/CDRTypes.h
++++ b/src/lib/CDRTypes.h
+@@ -143,6 +143,7 @@ struct CDRStyle
+   unsigned short m_charSet;
+   librevenge::RVNGString m_fontName;
+   double m_fontSize;
++  unsigned m_fontWeight;   // 0: not set, else 400 / 700
+   unsigned m_align;
+   double m_leftIndent, m_firstIndent, m_rightIndent;
+   CDRLineStyle m_lineStyle;
+@@ -150,7 +151,7 @@ struct CDRStyle
+   unsigned m_parentId;
+   CDRStyle()
+     : m_charSet((unsigned short)-1), m_fontName(),
+-      m_fontSize(0.0), m_align(0), m_leftIndent(0.0), m_firstIndent(0.0),
++      m_fontSize(0.0), m_fontWeight(0), m_align(0), m_leftIndent(0.0), m_firstIndent(0.0),
+       m_rightIndent(0.0), m_lineStyle(), m_fillStyle(), m_parentId(0)
+   {
+     m_fontName.clear();
+@@ -164,6 +165,8 @@ struct CDRStyle
+     }
+     if (!CDR_ALMOST_ZERO(override.m_fontSize))
+       m_fontSize = override.m_fontSize;
++    if (override.m_fontWeight)
++      m_fontWeight = override.m_fontWeight;
+     if (override.m_align)
+       m_align = override.m_align;
+     if (!CDR_ALMOST_ZERO(override.m_leftIndent) && !CDR_ALMOST_ZERO(override.m_firstIndent) && !CDR_ALMOST_ZERO(override.m_rightIndent))
 diff --git a/src/lib/libcdr_utils.cpp b/src/lib/libcdr_utils.cpp
 index e88bda9..e999955 100644
 --- a/src/lib/libcdr_utils.cpp
