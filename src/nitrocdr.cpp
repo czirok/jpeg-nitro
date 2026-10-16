@@ -159,33 +159,35 @@ bool ends_with(const std::string &s, const char *t) {
 }
 
 // Bitstream's names of old CorelDRAW fonts: "Futura Lt BT", "AvantGarde Bk BT", "Futura XBlkCnIt BT":
-// the family, its style abbreviations in the last word (bold / italic set, width and light ones dropped)
-static void bitstream_name(std::string &family, bool &bold, bool &italic) {
-    if (!ends_with(family, " BT")) return;
+// the family and the weight / italic of the abbreviations in its last word (width ones dropped)
+static bool bitstream_name(std::string &family, int &weight, bool &italic) {
+    if (!ends_with(family, " BT")) return false;
     family.resize(family.size() - 3);
     size_t sp = family.rfind(' ');
-    if (sp == std::string::npos) return;
-    static const struct { const char *abbr; int kind; } abbrs[] = {   // 1 bold, 2 italic
-        {"XBlk", 1}, {"Blk", 1}, {"XBd", 1}, {"Bd", 1}, {"Hv", 1}, {"It", 2}, {"XLt", 0}, {"Lt", 0}, {"Bk", 0},
-        {"Md", 0}, {"XCn", 0}, {"Cn", 0}, {"Ex", 0}};
-    bool b = bold, it = italic;
+    if (sp == std::string::npos) return true;
+    static const struct { const char *abbr; int weight; } abbrs[] = {   // weight -1: italic, 0: width
+        {"XBlk", 900}, {"Blk", 900}, {"XBd", 800}, {"Bd", 700}, {"Hv", 800}, {"It", -1}, {"XLt", 200}, {"Lt", 300},
+        {"Bk", 400}, {"Md", 500}, {"XCn", 0}, {"Cn", 0}, {"Ex", 0}};
+    int w = weight;
+    bool it = italic;
     for (size_t i = sp + 1; i < family.size();) {
         bool found = false;
         for (const auto &a : abbrs) {
             size_t n = strlen(a.abbr);
             if (!family.compare(i, n, a.abbr)) {
-                b |= a.kind == 1;
-                it |= a.kind == 2;
+                if (a.weight > 0) w = std::max(a.weight, weight > 400 ? weight : 0);   // (bold stays bold)
+                if (a.weight < 0) it = true;
                 i += n;
                 found = true;
                 break;
             }
         }
-        if (!found) return;   // (an ordinary word)
+        if (!found) return true;   // (an ordinary word)
     }
     family.resize(sp);
-    bold = b;
+    weight = w;
     italic = it;
+    return true;
 }
 
 // Families of old CorelDRAW drawings that macOS does not have: the closest one it has.
@@ -202,7 +204,8 @@ static const char *substitute(const std::string &family) {
 plutovg_font_face_t *find_font(const std::string &name, bool bold, bool italic) {
     plutovg_font_face_cache_t *cache = font_cache();
     std::string family = name;
-    bitstream_name(family, bold, italic);
+    int weight = bold ? 700 : 400;
+    bool bitstream = bitstream_name(family, weight, italic);
     for (bool changed = true; changed;) {
         changed = false;
         static const char *const suffixes[] = {" CE", " Cyr", " Baltic", " Greek", " Tur"};
@@ -210,20 +213,22 @@ plutovg_font_face_t *find_font(const std::string &name, bool bold, bool italic) 
             if (ends_with(family, sfx)) { family.resize(family.size() - strlen(sfx)); changed = true; }
         static const char *const bolds[] = {" Bold", " Black", " Heavy", " Semibold"};
         for (const char *sfx : bolds)
-            if (ends_with(family, sfx)) { family.resize(family.size() - strlen(sfx)); bold = changed = true; }
+            if (ends_with(family, sfx)) { family.resize(family.size() - strlen(sfx)); weight = std::max(weight, 700); changed = true; }
         static const char *const italics[] = {" Italic", " Oblique"};
         for (const char *sfx : italics)
             if (ends_with(family, sfx)) { family.resize(family.size() - strlen(sfx)); italic = changed = true; }
     }
     const char *sub = substitute(family);
-    const char *tries[] = {name.c_str(), family.c_str(), sub ? sub : family.c_str(), "Arial", "Helvetica"};
+    // a Bitstream font also under Linotype's name of the family ("Futura Lt BT": "Futura LT" Light)
+    std::string linotype = bitstream ? family + " LT" : family;
+    const char *tries[] = {name.c_str(), linotype.c_str(), family.c_str(), sub ? sub : family.c_str(), "Arial", "Helvetica"};
     for (const char *t : tries) {
         // upright text: not from a family that has only italic faces (an installed "Futura Lt BT"
         // Light Italic alone made every Futura text italic); the next candidate instead
-        if (!italic && t != tries[3] && t != tries[4] && !plutovg_font_face_cache_has_style(cache, t, false) &&
+        if (!italic && t != tries[4] && t != tries[5] && !plutovg_font_face_cache_has_style(cache, t, false) &&
             plutovg_font_face_cache_has_style(cache, t, true))
             continue;
-        plutovg_font_face_t *f = plutovg_font_face_cache_get(cache, t, bold, italic);
+        plutovg_font_face_t *f = plutovg_font_face_cache_get_weight(cache, t, weight, italic);
         if (f) return f;
     }
     return nullptr;   // (a family without that style gives its closest face)
