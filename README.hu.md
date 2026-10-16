@@ -22,7 +22,7 @@ dekódolnak — pedig a JPEG, a PNG és a PSD tömörítése is eredendően soro
 | **nitropng** | PNG (8 bites, nem interlaced) | spekulatív párhuzamos inflate (a még ismeretlen adatra mutató visszahivatkozásokat utólag oldja fel, Adler-32-vel ellenőrizve) + „hullámfront” szűrővisszafejtés | 38 valódi PNG: átlag **~43 ms** | Wuffs ~171 ms, ImageIO ~318 ms |
 | **nitropsd** | Photoshop PSD/PSB (8 bites RGB / szürke) | összesített kép: RLE-sorok párhuzamosan, ZIP a nitropng inflate-jével; nagy, rétegekkel teli fájlból csak az összesített képet olvassa be | 24 MP RLE: **~5 ms** | ImageIO ~170 ms |
 | **nitrosvg** | SVG (szűrők nélkül) | lunasvg-értelmező + plutovg-renderelő, fontkereséssel a rendszer és a felhasználó fontkönyvtáraiban | 38 MB-os SVG: **~0,6 s** | WebKit ~1,45 s, CoreSVG ~2,9 s |
-| **nitrocdr** | CorelDRAW 5 – X6 (CDR), CMX | saját [libcdr-forkunk](https://github.com/gereoffy/libcdr) sok javítással (szövegstílusok, sorköz, vágás, bitkép-átlátszóság) és kétszer gyorsabb librevenge-dzsel; közvetlenül plutovg-vel rajzol | 17,7 MB-os, csak vektoros CDR: **~3,05 s** | eredeti libcdr `cdr2xhtml` ~9 s (csak SVG-vé alakítás) |
+| **nitrocdr** | CorelDRAW 5 – X6 (CDR), CMX | saját [libcdr-forkunk](https://github.com/gereoffy/libcdr) sok javítással (szövegstílusok, sorköz, vágás, bitkép-átlátszóság) és kétszer gyorsabb librevenge-dzsel; közvetlenül plutovg-vel rajzol | 17,7 MB-os, csak vektoros CDR: **~1,8 s**, ~3× gyorsabb | eredeti libcdr `cdr2xhtml` ~5,4 s (csak SVG-vé alakítás) |
 
 Az idők Intel i9-en mérve. A dekóderek ARM-on (NEON) is gyorsak: egy 2020-as M1-es MacBook
 Airen egy 24 MP-es JPEG ~30 ms alatt dekódolódik, ~3×-osan gyorsabban, mint ugyanazon a gépen az
