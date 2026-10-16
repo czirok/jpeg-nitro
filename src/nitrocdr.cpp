@@ -117,6 +117,9 @@ struct Line {
     int align = 0;   // 0 left, 1 center, 2 right
     std::vector<Span> spans;
     float width = 0, size = 0, ascent = 0;
+    float height = 0;   // its line spacing: the font's ascent + descent (CorelDRAW's 100%)
+    plutovg_font_face_t *emptyFace = nullptr;   // the font of the line break that started it (for an
+    float emptySize = 0;                        // empty line: its height)
 };
 struct Text {
     float x = 0, y = 0, w = 0, h = 0, rotate = 0;   // frame (w = h = 0: artistic text at x, y)
@@ -215,6 +218,11 @@ plutovg_font_face_t *find_font(const std::string &name, bool bold, bool italic) 
     const char *sub = substitute(family);
     const char *tries[] = {name.c_str(), family.c_str(), sub ? sub : family.c_str(), "Arial", "Helvetica"};
     for (const char *t : tries) {
+        // upright text: not from a family that has only italic faces (an installed "Futura Lt BT"
+        // Light Italic alone made every Futura text italic); the next candidate instead
+        if (!italic && t != tries[3] && t != tries[4] && !plutovg_font_face_cache_has_style(cache, t, false) &&
+            plutovg_font_face_cache_has_style(cache, t, true))
+            continue;
         plutovg_font_face_t *f = plutovg_font_face_cache_get(cache, t, bold, italic);
         if (f) return f;
     }
@@ -520,6 +528,8 @@ private:
         if (!m_text) return;
         m_text->lines.emplace_back();
         m_text->lines.back().align = m_align;
+        m_text->lines.back().emptyFace = m_span.face;
+        m_text->lines.back().emptySize = m_span.size;
     }
     void appendText(const std::string &s) {
         if (m_text->lines.empty()) newLine();
@@ -551,12 +561,23 @@ private:
                     float asc = 0, desc = 0, gap = 0;
                     plutovg_font_face_get_metrics(s.face, s.size, &asc, &desc, &gap, nullptr);
                     l.ascent = std::max(l.ascent, asc);
+                    l.height = std::max(l.height, asc - desc);
+                }
+            }
+            if (l.spans.empty() && l.emptySize > 0) {   // an empty line: as high as the line break's font
+                l.size = l.emptySize;
+                if (l.emptyFace) {
+                    float asc = 0, desc = 0, gap = 0;
+                    plutovg_font_face_get_metrics(l.emptyFace, l.size, &asc, &desc, &gap, nullptr);
+                    l.ascent = asc;
+                    l.height = asc - desc;
                 }
             }
             if (l.size == 0) l.size = 12;
             if (l.ascent == 0) l.ascent = l.size * 0.8f;
+            if (l.height == 0) l.height = l.size * 1.15f;
             maxw = std::max(maxw, l.width);
-            total += l.size * 1.2f;
+            total += l.height;
         }
         bool artistic = t.w == 0 && t.h == 0;
         float top = artistic ? t.y - t.lines[0].ascent : t.y;
@@ -729,7 +750,7 @@ void drawItem(plutovg_canvas_t *c, const Item &it, float scale) {
         float base = artistic ? t.y : t.y + t.lines[0].ascent;
         for (size_t i = 0; i < t.lines.size(); i++) {
             const Line &l = t.lines[i];
-            if (i) base += l.size * 1.2f;
+            if (i) base += l.height;
             float x;
             if (artistic) x = l.align == 1 ? t.x - l.width / 2 : l.align == 2 ? t.x - l.width : t.x;
             else x = l.align == 1 ? t.x + (t.w - l.width) / 2 : l.align == 2 ? t.x + t.w - l.width : t.x;

@@ -10,6 +10,8 @@ lunasvg / plutovg fixes for nitroview (scripts/get-deps.sh applies this after do
 - the font cache chose condensed or expanded faces as readily as the normal one (macOS Futura:
   Futura Condensed Medium for Futura); with equal bold / italic the normal width wins now
 - macOS: the user's fonts (~/Library/Fonts, where Font Book installs) are loaded too
+- plutovg_font_face_cache_has_style(): whether a family has an upright / italic face (nitrocdr
+  skips a family with only italic faces for upright text)
 
 --- a/plutovg/source/plutovg-path.c
 +++ b/plutovg/source/plutovg-path.c
@@ -102,6 +104,48 @@ lunasvg / plutovg fixes for nitroview (scripts/get-deps.sh applies this after do
  #elif defined(__linux__)
      num_faces += plutovg_font_face_cache_load_dir(cache, "/usr/share/fonts");
      num_faces += plutovg_font_face_cache_load_dir(cache, "/usr/local/share/fonts");
+--- a/plutovg/include/plutovg.h
++++ b/plutovg/include/plutovg.h
+@@ -969,6 +969,14 @@
+  * @return A pointer to the matching `plutovg_font_face_t` object, or NULL if not found. The returned face is owned by the cache and must not be destroyed by the caller.
+  */
+ PLUTOVG_API plutovg_font_face_t* plutovg_font_face_cache_get(plutovg_font_face_cache_t* cache, const char* family, bool bold, bool italic);
++
++/**
++ * @brief Tells whether the cache has a face of the family with the given italic flag.
++ *
++ * plutovg_font_face_cache_get() returns the closest face of a family, an italic one for upright
++ * text when the family has only that; this lets the caller try another family instead.
++ */
++PLUTOVG_API bool plutovg_font_face_cache_has_style(plutovg_font_face_cache_t* cache, const char* family, bool italic);
+ 
+ /**
+  * @brief Load all font faces from a file and add them to the cache.
+--- a/plutovg/source/plutovg-font.c
++++ b/plutovg/source/plutovg-font.c
+@@ -686,6 +686,22 @@
+ 
+     plutovg_mutex_unlock(&cache->mutex);
+     return face;
++}
++
++bool plutovg_font_face_cache_has_style(plutovg_font_face_cache_t* cache, const char* family, bool italic)
++{
++    bool found = false;
++    plutovg_mutex_lock(&cache->mutex);
++    for(int i = 0; i < cache->size && !found; ++i) {
++        for(plutovg_font_face_entry_t* entry = cache->entries[i]; entry; entry = entry->next) {
++            if(strcmp(entry->family, family) == 0 && entry->italic == italic) {
++                found = true;
++                break;
++            }
++        }
++    }
++    plutovg_mutex_unlock(&cache->mutex);
++    return found;
+ }
+ 
+ #ifndef PLUTOVG_DISABLE_FONT_FACE_CACHE_LOAD
 --- a/source/svgparser.cpp
 +++ b/source/svgparser.cpp
 @@ -777,7 +777,6 @@
