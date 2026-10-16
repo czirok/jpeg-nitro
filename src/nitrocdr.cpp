@@ -107,6 +107,7 @@ struct Span {
     plutovg_font_face_t *face = nullptr;   // owned by the font cache
     float size = 12;
     float scaleX = 1;   // horizontal stretch (CorelDRAW text squeezed to fit, style:text-scale)
+    float shiftX = 0, shiftY = 0;   // moved from its place, in em (up positive; libcdr:shift-x / -y)
     Color color;
     std::string text;
     float width = 0;
@@ -394,6 +395,8 @@ public:
         m_span.size = (float)points(p["fo:font-size"], 12.0);
         double sx = number(p["style:text-scale"], 1.0);
         if (sx > 0.01 && sx < 100) m_span.scaleX = (float)sx;
+        m_span.shiftX = (float)number(p["libcdr:shift-x"]);
+        m_span.shiftY = (float)number(p["libcdr:shift-y"]);
         m_span.color = color(p["fo:color"]);
         std::string font = p["style:font-name"] ? p["style:font-name"]->getStr().cstr() : "Arial";
         std::lock_guard<std::mutex> g(g_lock);
@@ -500,11 +503,13 @@ private:
             l.width = 0;
             l.size = 0;
             l.ascent = 0;
+            float pen = 0;
             for (Span &s : l.spans) {
                 s.width = s.face ? plutovg_font_face_text_extents(s.face, s.size, s.text.data(), (int)s.text.size(),
                                                                   PLUTOVG_TEXT_ENCODING_UTF8, nullptr) * s.scaleX
                                  : 0;
-                l.width += s.width;
+                l.width = std::max(l.width, pen + s.shiftX * s.size + s.width);   // (shifted words reach further)
+                pen += s.width;
                 l.size = std::max(l.size, s.size);
                 if (s.face) {
                     float asc = 0, desc = 0, gap = 0;
@@ -695,14 +700,15 @@ void drawItem(plutovg_canvas_t *c, const Item &it, float scale) {
                 if (s.face) {
                     plutovg_canvas_set_font(c, s.face, s.size);
                     setColor(c, s.color, 1);
+                    float sx = x + s.shiftX * s.size, sy = base - s.shiftY * s.size;   // (the next span starts unshifted)
                     if (s.scaleX != 1) {
                         plutovg_canvas_save(c);
-                        plutovg_canvas_translate(c, x, base);
+                        plutovg_canvas_translate(c, sx, sy);
                         plutovg_canvas_scale(c, s.scaleX, 1);
                         plutovg_canvas_fill_text(c, s.text.data(), (int)s.text.size(), PLUTOVG_TEXT_ENCODING_UTF8, 0, 0);
                         plutovg_canvas_restore(c);
                     } else
-                        plutovg_canvas_fill_text(c, s.text.data(), (int)s.text.size(), PLUTOVG_TEXT_ENCODING_UTF8, x, base);
+                        plutovg_canvas_fill_text(c, s.text.data(), (int)s.text.size(), PLUTOVG_TEXT_ENCODING_UTF8, sx, sy);
                 }
                 x += s.width;
             }
