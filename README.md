@@ -169,8 +169,8 @@ the drawing's bounding box (with a small margin), not the page size set in the f
 fills the window. Paging, zooming and the sharp detail work as for SVG ([ and ] switch between the
 pages of a multi-page document). libcdr comes from our fork,
 [gereoffy/libcdr](https://github.com/gereoffy/libcdr), which has the fixes this needed, one commit
-each: open paths are not filled; text keeps its rotation, its horizontal stretch and its bold, and is
-placed at its real origin; `CMYK100` colours (CorelDRAW 2022) are not white; objects on hidden layers
+each: open paths are not filled; text keeps its rotation, its horizontal stretch, bold and italic, and
+is placed at its real origin; `CMYK100` colours (CorelDRAW 2022) are not white; objects on hidden layers
 are skipped (an imported PDF keeps its switched-off layers as hidden layers); symbol definitions do
 not make an extra page; bitmaps keep their transparent background; texts lost in CorelDRAW 5 and 7–X5
 files show; and ICU is replaced by iconv (code pages; without a charset, windows-1250 when the text

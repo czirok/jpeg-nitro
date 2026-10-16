@@ -7,6 +7,8 @@ lunasvg / plutovg fixes for nitroview (scripts/get-deps.sh applies this after do
   point (macOS Times "C"; ASan: heap-buffer-overflow in stbtt_GetGlyphShape;
   https://github.com/nothings/stb/issues/1296)
 - XML comments inside <text> were drawn as text (https://github.com/sammycage/lunasvg/pull/281)
+- the font cache chose condensed or expanded faces as readily as the normal one (macOS Futura:
+  Futura Condensed Medium for Futura); with equal bold / italic the normal width wins now
 
 --- a/plutovg/source/plutovg-path.c
 +++ b/plutovg/source/plutovg-path.c
@@ -45,6 +47,45 @@ lunasvg / plutovg fixes for nitroview (scripts/get-deps.sh applies this after do
      return surface;
  }
  
+--- a/plutovg/source/plutovg-font.c
++++ b/plutovg/source/plutovg-font.c
+@@ -513,6 +513,7 @@
+     int ttcindex;
+     bool bold;
+     bool italic;
++    bool narrow; // condensed or expanded (OS/2 usWidthClass other than normal)
+     struct plutovg_font_face_entry* next;
+ } plutovg_font_face_entry_t;
+ 
+@@ -619,6 +620,7 @@
+     entry->ttcindex = 0;
+     entry->bold = bold;
+     entry->italic = italic;
++    entry->narrow = false;
+ 
+     plutovg_font_face_cache_add_entry(cache, entry);
+ }
+@@ -635,8 +637,8 @@
+ 
+ static plutovg_font_face_entry_t* plutovg_font_face_entry_select(plutovg_font_face_entry_t* a, plutovg_font_face_entry_t* b, bool bold, bool italic)
+ {
+-    int a_score = (bold == a->bold) + (italic == a->italic);
+-    int b_score = (bold == b->bold) + (italic == b->italic);
++    int a_score = 2 * ((bold == a->bold) + (italic == a->italic)) + !a->narrow;
++    int b_score = 2 * ((bold == b->bold) + (italic == b->italic)) + !b->narrow;
+     return a_score > b_score ? a : b;
+ }
+ 
+@@ -934,6 +936,9 @@
+         if(style & 0x2) {
+             entry->italic = true;
+         }
++
++        stbtt_uint32 os2 = stbtt__find_table(data, offset, "OS/2");
++        entry->narrow = os2 && ttUSHORT(data + os2 + 6) != 5 && ttUSHORT(data + os2 + 6) != 0;   // usWidthClass
+ 
+         plutovg_font_face_cache_add_entry(cache, entry);
+         num_faces++;
 --- a/source/svgparser.cpp
 +++ b/source/svgparser.cpp
 @@ -777,7 +777,6 @@

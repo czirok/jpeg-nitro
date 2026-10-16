@@ -153,11 +153,51 @@ bool ends_with(const std::string &s, const char *t) {
     return s.size() >= n && !strcasecmp(s.c_str() + s.size() - n, t);
 }
 
+// Bitstream's names of old CorelDRAW fonts: "Futura Lt BT", "AvantGarde Bk BT", "Futura XBlkCnIt BT":
+// the family, its style abbreviations in the last word (bold / italic set, width and light ones dropped)
+static void bitstream_name(std::string &family, bool &bold, bool &italic) {
+    if (!ends_with(family, " BT")) return;
+    family.resize(family.size() - 3);
+    size_t sp = family.rfind(' ');
+    if (sp == std::string::npos) return;
+    static const struct { const char *abbr; int kind; } abbrs[] = {   // 1 bold, 2 italic
+        {"XBlk", 1}, {"Blk", 1}, {"XBd", 1}, {"Bd", 1}, {"Hv", 1}, {"It", 2}, {"XLt", 0}, {"Lt", 0}, {"Bk", 0},
+        {"Md", 0}, {"XCn", 0}, {"Cn", 0}, {"Ex", 0}};
+    bool b = bold, it = italic;
+    for (size_t i = sp + 1; i < family.size();) {
+        bool found = false;
+        for (const auto &a : abbrs) {
+            size_t n = strlen(a.abbr);
+            if (!family.compare(i, n, a.abbr)) {
+                b |= a.kind == 1;
+                it |= a.kind == 2;
+                i += n;
+                found = true;
+                break;
+            }
+        }
+        if (!found) return;   // (an ordinary word)
+    }
+    family.resize(sp);
+    bold = b;
+    italic = it;
+}
+
+// Families of old CorelDRAW drawings that macOS does not have: the closest one it has.
+static const char *substitute(const std::string &family) {
+    static const char *const subst[][2] = {{"AvantGarde", "Avenir"}, {"Century Gothic", "Avenir"}};
+    for (const auto &e : subst)
+        if (!strcasecmp(family.c_str(), e[0])) return e[1];
+    return nullptr;
+}
+
 // CorelDRAW font names: "Arial", "Arial CE" (Central European variants of old fonts),
-// "Times New Roman Bold" ... -> a face of the system fonts, falling back to Arial / Helvetica.
+// "Times New Roman Bold", "Futura Lt BT" ... -> a face of the system fonts, falling back to
+// Arial / Helvetica.
 plutovg_font_face_t *find_font(const std::string &name, bool bold, bool italic) {
     plutovg_font_face_cache_t *cache = font_cache();
     std::string family = name;
+    bitstream_name(family, bold, italic);
     for (bool changed = true; changed;) {
         changed = false;
         static const char *const suffixes[] = {" CE", " Cyr", " Baltic", " Greek", " Tur"};
@@ -170,9 +210,10 @@ plutovg_font_face_t *find_font(const std::string &name, bool bold, bool italic) 
         for (const char *sfx : italics)
             if (ends_with(family, sfx)) { family.resize(family.size() - strlen(sfx)); italic = changed = true; }
     }
-    const char *tries[] = {name.c_str(), family.c_str(), "Arial", "Helvetica"};
-    for (int k = 0; k < 4; k++) {
-        plutovg_font_face_t *f = plutovg_font_face_cache_get(cache, tries[k], bold, italic);
+    const char *sub = substitute(family);
+    const char *tries[] = {name.c_str(), family.c_str(), sub ? sub : family.c_str(), "Arial", "Helvetica"};
+    for (const char *t : tries) {
+        plutovg_font_face_t *f = plutovg_font_face_cache_get(cache, t, bold, italic);
         if (f) return f;
     }
     return nullptr;   // (a family without that style gives its closest face)

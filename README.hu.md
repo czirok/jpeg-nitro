@@ -123,7 +123,7 @@ is kitölti az ablakot. A lapozás, a nagyítás és az éles részlet úgy megy
 (többoldalas dokumentum oldalai között a [ és ] vált). A libcdr a saját forkunkból jön
 ([gereoffy/libcdr](https://github.com/gereoffy/libcdr)), benne a szükséges javítások, mindegyik
 külön commit: a nyitott vonalak nincsenek kitöltve; a szöveg megtartja a forgatását, a vízszintes
-nyújtását és a félkövérségét, és a valódi kezdőpontjára kerül; a `CMYK100` színek (CorelDRAW 2022)
+nyújtását, a félkövér és dőlt stílusát, és a valódi kezdőpontjára kerül; a `CMYK100` színek (CorelDRAW 2022)
 nem fehérek; a rejtett rétegek elemei kimaradnak (egy importált PDF a kikapcsolt rétegeit rejtett
 rétegként tartja meg); a szimbólumdefiníciók nem adnak egy plusz oldalt; a bitképek megtartják az
 átlátszó hátterüket; a CorelDRAW 5 és 7–X5 fájlok elveszett szövegei megjelennek; és az ICU helyett
