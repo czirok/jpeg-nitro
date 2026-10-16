@@ -129,8 +129,10 @@ nem fehérek; a rejtett rétegek elemei kimaradnak (egy importált PDF a kikapcs
 rétegként tartja meg); a szimbólumdefiníciók nem adnak egy plusz oldalt; a bitképek megtartják az
 átlátszó hátterüket, és a saját körvonalukra vágva jelennek meg (az importált tervek falsraffozása); a CorelDRAW 5 és 7–X5 fájlok elveszett szövegei megjelennek; és az ICU helyett
 iconv dolgozik (kódlapok; karakterkészlet nélkül windows-1250, ha a szövegben ő/ű van). A
-`patches/librevenge.patch` a beágyazott képeket base64 nélkül engedi át. A vonalak legalább egy
-képpont szélesek, mint a CorelDRAW-ban. Amit nem tud: nyílhegyek, a Corel saját vektoros és
+`patches/librevenge.patch` a beágyazott képeket base64 nélkül engedi át. A fontokat a /Library/Fonts,
+a /System/Library/Fonts és a ~/Library/Fonts mappából veszi (a Bitstream-nevek, pl. „Futura Lt
+BT”, a családra képződnek le); hiányzó font helyett hasonlót használ, ilyenkor a szöveg kicsit
+hosszabb vagy rövidebb lehet. A vonalak legalább egy képpont szélesek, mint a CorelDRAW-ban. Amit nem tud: nyílhegyek, a Corel saját vektoros és
 bitképes mintakitöltései. Egy Macről összegyűjtött 193 CDR (ArchiCAD-PDF-ből készült alaprajzok,
 hálózati térképek, logók) mind megnyílik; a medián 80 ms, a nagy tervrajzok 1–8 s (a libcdr
 feldolgozása, maga a rajzolás 100 ms alatt).

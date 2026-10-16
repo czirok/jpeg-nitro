@@ -9,6 +9,7 @@ lunasvg / plutovg fixes for nitroview (scripts/get-deps.sh applies this after do
 - XML comments inside <text> were drawn as text (https://github.com/sammycage/lunasvg/pull/281)
 - the font cache chose condensed or expanded faces as readily as the normal one (macOS Futura:
   Futura Condensed Medium for Futura); with equal bold / italic the normal width wins now
+- macOS: the user's fonts (~/Library/Fonts, where Font Book installs) are loaded too
 
 --- a/plutovg/source/plutovg-path.c
 +++ b/plutovg/source/plutovg-path.c
@@ -86,6 +87,21 @@ lunasvg / plutovg fixes for nitroview (scripts/get-deps.sh applies this after do
  
          plutovg_font_face_cache_add_entry(cache, entry);
          num_faces++;
+--- a/plutovg/source/plutovg-font.c
++++ b/plutovg/source/plutovg-font.c
+@@ -1043,6 +1043,12 @@
+ #elif defined(__APPLE__)
+     num_faces += plutovg_font_face_cache_load_dir(cache, "/Library/Fonts");
+     num_faces += plutovg_font_face_cache_load_dir(cache, "/System/Library/Fonts");
++    const char* home = getenv("HOME"); // the user's fonts too (Font Book installs there)
++    if(home) {
++        char path[4096];
++        if(snprintf(path, sizeof(path), "%s/Library/Fonts", home) < (int)sizeof(path))
++            num_faces += plutovg_font_face_cache_load_dir(cache, path);
++    }
+ #elif defined(__linux__)
+     num_faces += plutovg_font_face_cache_load_dir(cache, "/usr/share/fonts");
+     num_faces += plutovg_font_face_cache_load_dir(cache, "/usr/local/share/fonts");
 --- a/source/svgparser.cpp
 +++ b/source/svgparser.cpp
 @@ -777,7 +777,6 @@

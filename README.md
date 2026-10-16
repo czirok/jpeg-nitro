@@ -174,8 +174,10 @@ exact size and the shifts that place the words of imported PDF text, and is plac
 are skipped (an imported PDF keeps its switched-off layers as hidden layers); symbol definitions do
 not make an extra page; bitmaps keep their transparent background and are cut to their own outline (the wall hatch of imported plans); texts lost in CorelDRAW 5 and 7–X5
 files show; and ICU is replaced by iconv (code pages; without a charset, windows-1250 when the text
-has ő/ű). `patches/librevenge.patch` lets embedded images through without base64. Lines are never
-thinner than one device pixel, as in CorelDRAW. Not supported: arrowheads, Corel's own vector and
+has ő/ű). `patches/librevenge.patch` lets embedded images through without base64. Fonts come from /Library/Fonts,
+/System/Library/Fonts and ~/Library/Fonts (Bitstream names such as "Futura Lt BT" map to the
+family); a missing font is replaced by a similar one, so its text may run a little longer or
+shorter. Lines are never thinner than one device pixel, as in CorelDRAW. Not supported: arrowheads, Corel's own vector and
 bitmap pattern fills. On 193
 CDRs collected from a Mac (architectural plans from ArchiCAD PDFs, network maps, logos) every file
 opens; the median takes 80 ms, big plans 1–8 s (libcdr's parsing, the drawing itself < 100 ms).
