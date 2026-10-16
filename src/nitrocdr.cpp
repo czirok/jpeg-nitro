@@ -77,11 +77,45 @@ struct Image {
     plutovg_surface_t *s = nullptr;
     ~Image() { plutovg_surface_destroy(s); }
 };
+// libcdr's own bitmaps: uncompressed 32-bit BMPs (B G R A, bottom-up), alpha all 0 when opaque;
+// read here directly, as stb_image would (twice as fast as stb_image + plutovg's conversion)
+static plutovg_surface_t *bmp32(const unsigned char *b, size_t n) {
+    auto u32 = [b](size_t o) { return (uint32_t)b[o] | (uint32_t)b[o + 1] << 8 | (uint32_t)b[o + 2] << 16 | (uint32_t)b[o + 3] << 24; };
+    if (n < 54 || b[0] != 'B' || b[1] != 'M' || u32(14) != 40 || (b[28] | b[29] << 8) != 32 || u32(30) != 0) return nullptr;
+    uint32_t off = u32(10), w = u32(18);
+    int32_t h = (int32_t)u32(22);
+    uint32_t ah = h < 0 ? 0u - (uint32_t)h : (uint32_t)h;
+    if (!w || !ah || w > 65535 || ah > 65535 || off > n || (n - off) / 4 / w < ah) return nullptr;
+    const unsigned char *px = b + off;
+    size_t count = (size_t)w * ah;
+    bool alpha = false;
+    for (size_t i = 0; i < count && !alpha; i++) alpha = px[i * 4 + 3] != 0;
+    plutovg_surface_t *s = plutovg_surface_create((int)w, (int)ah);
+    if (!s) return nullptr;
+    unsigned char *data = plutovg_surface_get_data(s);
+    int stride = plutovg_surface_get_stride(s);
+    for (uint32_t y = 0; y < ah; y++) {
+        const unsigned char *src = px + (size_t)(h > 0 ? ah - 1 - y : y) * w * 4;
+        uint32_t *dst = (uint32_t *)(data + (size_t)stride * y);
+        for (uint32_t x = 0; x < w; x++, src += 4) {
+            uint32_t a = alpha ? src[3] : 255, r = src[2], g = src[1], bl = src[0];
+            if (a != 255) {   // (premultiplied, as plutovg_convert_rgba_to_argb)
+                r = r * a / 255;
+                g = g * a / 255;
+                bl = bl * a / 255;
+            }
+            dst[x] = a ? a << 24 | r << 16 | g << 8 | bl : 0;
+        }
+    }
+    return s;
+}
+
 std::shared_ptr<Image> image(const RVNGProperty *p) {   // a BMP (or other stb_image format) property
     const librevenge::RVNGBinaryData *d = p ? p->getBinaryData() : nullptr;
     if (!d || !d->size()) return nullptr;
     auto img = std::make_shared<Image>();
-    img->s = plutovg_surface_load_from_image_data(d->getDataBuffer(), (int)d->size());
+    img->s = bmp32(d->getDataBuffer(), d->size());
+    if (!img->s) img->s = plutovg_surface_load_from_image_data(d->getDataBuffer(), (int)d->size());
     return img->s ? img : nullptr;
 }
 
