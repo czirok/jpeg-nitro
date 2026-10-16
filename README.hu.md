@@ -138,9 +138,9 @@ iconv dolgozik (kódlapok; karakterkészlet nélkül windows-1250, ha a szövegb
 a /System/Library/Fonts és a ~/Library/Fonts mappából veszi (a Bitstream-nevek, pl. „Futura Lt
 BT”, a családra képződnek le); hiányzó font helyett hasonlót használ, ilyenkor a szöveg kicsit
 hosszabb vagy rövidebb lehet. A vonalak legalább egy képpont szélesek, mint a CorelDRAW-ban. Amit nem tud: nyílhegyek, a Corel saját vektoros és
-bitképes mintakitöltései. Egy Macről összegyűjtött 193 CDR (ArchiCAD-PDF-ből készült alaprajzok,
-hálózati térképek, logók) mind megnyílik; a medián 80 ms, a nagy tervrajzok 1–8 s (a libcdr
-feldolgozása, maga a rajzolás 100 ms alatt). macOS-en a C++ kód (libcdr,
+bitképes mintakitöltései. Egy Macről összegyűjtött 216 CDR (ArchiCAD-PDF-ből készült alaprajzok,
+hálózati térképek, logók) mind megnyílik; a medián 20 ms, a legnagyobb tervrajzok 0,5–1,8 s egy
+Intel i9-en (nagyrészt a libcdr feldolgozása). macOS-en a C++ kód (libcdr,
 librevenge, lunasvg) a [mimalloc](https://github.com/microsoft/mimalloc)-kal foglal memóriát: egy nagy
 terv betöltése több millió apró foglalással jár, és így Intelen és Apple Siliconon is 20–25%-kal
 gyorsabban töltődnek be a tervek (`make MIMALLOC=0`: a rendszer malloc-ja).

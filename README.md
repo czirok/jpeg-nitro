@@ -184,9 +184,9 @@ has ő/ű). `patches/librevenge.patch` lets embedded images through without base
 /System/Library/Fonts and ~/Library/Fonts (Bitstream names such as "Futura Lt BT" map to the
 family); a missing font is replaced by a similar one, so its text may run a little longer or
 shorter. Lines are never thinner than one device pixel, as in CorelDRAW. Not supported: arrowheads, Corel's own vector and
-bitmap pattern fills. On 193
+bitmap pattern fills. On 216
 CDRs collected from a Mac (architectural plans from ArchiCAD PDFs, network maps, logos) every file
-opens; the median takes 80 ms, big plans 1–8 s (libcdr's parsing, the drawing itself < 100 ms). On macOS the C++ code
+opens; the median takes 20 ms, the biggest plans 0.5–1.8 s on an Intel i9 (mostly libcdr's parsing). On macOS the C++ code
 (libcdr, librevenge, lunasvg) allocates through [mimalloc](https://github.com/microsoft/mimalloc):
 loading a big plan makes millions of small allocations, and with it plans load 20–25% faster on
 Intel and Apple Silicon too (`make MIMALLOC=0`: the system malloc).
