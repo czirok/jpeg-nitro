@@ -144,7 +144,8 @@ Apple ImageIO like the other formats. Transparent images are shown over black. O
 
 **SVG** (macOS, when `scripts/get-deps.sh` has fetched [lunasvg](https://github.com/sammycage/lunasvg)):
 rendered by lunasvg over white, first in full with the long side 1024–4096 pixels (small icons are
-enlarged, huge drawings reduced), so paging, fitting and zooming out work as for photos. Zoomed in
+enlarged, huge drawings reduced; fitted to the screen, in full screen or after key 0, at least
+the screen's size, the prefetched images too, so they are sharp right away), so paging, fitting and zooming out work as for photos. Zoomed in
 beyond that, the visible part is rendered again at screen resolution once the zoom or position has
 been still for ~80 ms (typically 5–40 ms); until then the previous rendering is scaled, so pinching
 stays smooth and the picture sharpens when it stops. Supported: shapes, paths, gradients, clipping,

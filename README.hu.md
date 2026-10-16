@@ -96,7 +96,8 @@ AI-képek, felskálázott textúrák, Photoshop-exportok) a nitropng átlag **~4
 
 **SVG** (macOS-en, ha a `scripts/get-deps.sh` letöltötte a [lunasvg](https://github.com/sammycage/lunasvg)-t):
 a lunasvg rajzolja fehér háttérre, először egészben, a hosszabbik oldalt 1024–4096 pixelre
-igazítva (a kis ikonok nagyobbak lesznek, a hatalmas rajzok kisebbek), így a lapozás, az
+igazítva (a kis ikonok nagyobbak lesznek, a hatalmas rajzok kisebbek; teljes képernyőn vagy a 0
+billentyű után legalább képernyőméretben, az előre betöltött képek is, így rögtön élesek), így a lapozás, az
 ablakhoz igazítás és a kicsinyítés ugyanúgy megy, mint a fotóknál. Ennél jobban felnagyítva a
 látható részt képernyő-felbontásban újra kirajzolja, amikor a nagyítás vagy a pozíció ~80 ms-ig
 nem változik (jellemzően 5–40 ms alatt); addig az előző rajzolat nagyul, így a csippentés

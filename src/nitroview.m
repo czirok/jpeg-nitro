@@ -39,10 +39,10 @@
 #endif
 #ifdef NV_CDR
 #include "nitrocdr.h"    // optional CorelDRAW rendering (libcdr + plutovg)
-#include <stdatomic.h>
 #endif
 #if defined(NV_SVG) || defined(NV_CDR)
 #define NV_VECTOR 1      // vector images: rendered again, sharp, when zoomed in
+#include <stdatomic.h>
 #endif
 // renders a vector document's area into BGRA (see nitrosvg_render / nitrocdr_render)
 typedef int (*VectorRender)(void *doc, uint8_t *bgra, int w, int h, size_t pitch, double scale, double x0, double y0);
@@ -377,9 +377,20 @@ static Decoded *decode_imageio(NSData *data, Decoded *d, BufferPool *pool, size_
 // pixels: small icons are enlarged, huge drawings reduced), over white. Zoomed in further,
 // the viewer renders the visible part again at screen resolution (see ViewerView
 // vectorDetail). Takes over the document (freed with the Decoded).
+// Shown fitted to the screen (full screen or key 0), the viewer sets the screen's size in
+// pixels here: images are then rendered at least that large, sharp from the start (the
+// prefetched ones too), not first enlarged and sharpened a moment later by vectorDetail.
+static _Atomic int g_vector_tw, g_vector_th;
+static BOOL vector_fits(Decoded *d, int tw, int th) {   // big enough for the target (or no target)
+    return tw <= 0 || th <= 0 || MIN((double)tw / d.width, (double)th / d.height) <= 1.01 ||
+           MAX(d.width, d.height) >= MAX_TEX;
+}
 static Decoded *decode_vector(void *doc, double w, double h, VectorRender render, void (*vfree)(void *), int mode, Decoded *d,
                               BufferPool *pool, size_t align, double t1) {
     double l = MAX(w, h), k = l < 1024 ? 1024 / l : l > 4096 ? 4096 / l : 1;
+    int tw = atomic_load(&g_vector_tw), th = atomic_load(&g_vector_th);
+    if (tw > 0 && th > 0 && w > 0 && h > 0) k = MAX(k, MIN(tw / w, th / h));
+    k = MIN(k, MAX_TEX / l);
     int iw = MAX(1, MIN(MAX_TEX, (int)lround(w * k))), ih = MAX(1, MIN(MAX_TEX, (int)lround(h * k)));
     id<MTLBuffer> buf = w > 0 && h > 0 ? bgra_buffer(d, iw, ih, pool, align) : nil;
     if (!buf || render(doc, buf.contents, iw, ih, d.pitch[0], k, 0, 0)) {
@@ -792,6 +803,9 @@ typedef struct {
 // Multi-page documents: draws another page of image i in the background; it replaces the
 // decoded image and onDecoded reports it (nothing happens if i was paged away or evicted).
 - (void)showPage:(int)page of:(NSInteger)i;
+// The size vector images are rendered for changed (see g_vector_tw): prefetched ones too small
+// for it are dropped and rendered again (the current one is sharpened by vectorDetail).
+- (void)vectorTargetChanged;
 @property(nonatomic, copy) void (^onDecoded)(NSInteger index);
 @end
 
@@ -872,6 +886,21 @@ typedef struct {
         void (^cb)(NSInteger) = self.onDecoded;
         if (current && cb) dispatch_async(dispatch_get_main_queue(), ^{ cb(i); });
     });
+#endif
+}
+- (void)vectorTargetChanged {
+#ifdef NV_VECTOR
+    int tw = atomic_load(&g_vector_tw), th = atomic_load(&g_vector_th);
+    [_cond lock];
+    for (NSNumber *k in _cache.allKeys) {
+        Decoded *d = _cache[k];
+        if (d.vector && k.integerValue != _cur && !vector_fits(d, tw, th)) {
+            [self recycle:d];
+            [_cache removeObjectForKey:k];
+        }
+    }
+    [_cond signal];
+    [_cond unlock];
 #endif
 }
 - (void)focus:(NSInteger)cur direction:(int)dir {
@@ -1192,12 +1221,28 @@ static NSArray<NSString *> *dropped_paths(id<NSDraggingInfo> info);
 // 0: fit to the screen, enlarging small images too; stays on while paging (until W).
 - (void)fitToScreen {
     _fitScreen = YES;
+    [self updateVectorTarget];
     [self zoomFit];
+}
+
+// Fitted to the screen (full screen or key 0): vector images are rendered for its size.
+- (void)updateVectorTarget {
+#ifdef NV_VECTOR
+    NSScreen *sc = self.window.screen ?: NSScreen.mainScreen;
+    BOOL fit = self.window && (self.isFullScreen || _fitScreen);
+    int tw = fit ? (int)lround(sc.frame.size.width * sc.backingScaleFactor) : 0;
+    int th = fit ? (int)lround(sc.frame.size.height * sc.backingScaleFactor) : 0;
+    if (tw == atomic_load(&g_vector_tw) && th == atomic_load(&g_vector_th)) return;
+    atomic_store(&g_vector_tw, tw);
+    atomic_store(&g_vector_th, th);
+    [_loader vectorTargetChanged];
+#endif
 }
 
 - (void)windowToImage {
     _userSized = NO;
     _fitScreen = NO;
+    [self updateVectorTarget];
     [self zoomFit];
     Decoded *d = [_loader get:_index];
     if (d) [self fitWindowTo:d];
@@ -1540,6 +1585,7 @@ static int debug_zoom(void) {   // NV_DEBUG_ZOOM=1: log wheel / pinch events and
 }
 
 - (void)mtkView:(MTKView *)view drawableSizeWillChange:(CGSize)size {
+    [self updateVectorTarget];   // (full screen on / off, another screen)
     view.needsDisplay = YES;
     [self updateTitle];   // fit percentage changes with the window size
 }
