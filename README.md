@@ -28,7 +28,7 @@ Times on an Intel i9. The decoders are fast on ARM too (NEON): on a 2020 M1 MacB
 24 MP JPEG decodes in ~30 ms, ~3× faster than Apple's hardware JPEG decoder on the same machine
 ([Apple Silicon](#apple-silicon-m1)). They are plain C files without dependencies and can be
 used on their own ([Using the decoders](#using-the-decoders)). Photo series such as timelapses can be "played
-back" at full resolution in real time, up to 60 images/s. On macOS **Canon CR2** raw files show
+back" at full resolution in real time, up to 60 images/s. On macOS and Windows **Canon CR2** raw files show
 the full-size JPEG the camera stored in them (nitrojpeg, in milliseconds instead of ImageIO's
 150–400 ms; their rotation is honoured). HEIC, TIFF, WebP, GIF and BMP open
 through Apple ImageIO on macOS, WIC on Windows and GTK's loaders on Linux (see **Windows** and
