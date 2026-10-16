@@ -13,14 +13,16 @@ Linuxra**:
 | Windows 10-től | Win32 + Direct3D 11: egyetlen önálló `nitroview.exe` | `make windows` (llvm-mingw) |
 | Linux, GNOME | GTK 4 + libadwaita: `nitroview-gnome`, Flatpakként is | `make gnome` / `make flatpak` |
 
-Mindhárom ugyanarra a három saját dekóderre épül, amelyek egyetlen képet is az összes CPU-magon
-dekódolnak — pedig a JPEG, a PNG és a PSD tömörítése is eredendően soros:
+Mindhárom ugyanazokra a saját dekóderekre épül: hármat, amelyek egyetlen képet is az összes CPU-magon
+dekódolnak — pedig a JPEG, a PNG és a PSD tömörítése is eredendően soros —, és kettőt a vektoros rajzokhoz:
 
 | dekóder | formátum | hogyan | idő | szokásos dekóderek |
 |---|---|---|---|---|
 | **nitrojpeg** | baseline JPEG | spekulatív párhuzamos Huffman-dekódolás, AVX2 IDCT; bitre egyezik a libjpeg-turbóval | 24 MP-es fotó: **~11 ms** | libjpeg-turbo ~107 ms (1 szálon) |
 | **nitropng** | PNG (8 bites, nem interlaced) | spekulatív párhuzamos inflate (a még ismeretlen adatra mutató visszahivatkozásokat utólag oldja fel, Adler-32-vel ellenőrizve) + „hullámfront” szűrővisszafejtés | 38 valódi PNG: átlag **~43 ms** | Wuffs ~171 ms, ImageIO ~318 ms |
 | **nitropsd** | Photoshop PSD/PSB (8 bites RGB / szürke) | összesített kép: RLE-sorok párhuzamosan, ZIP a nitropng inflate-jével; nagy, rétegekkel teli fájlból csak az összesített képet olvassa be | 24 MP RLE: **~5 ms** | ImageIO ~170 ms |
+| **nitrosvg** | SVG (szűrők nélkül) | lunasvg-értelmező + plutovg-renderelő, fontkereséssel a rendszer és a felhasználó fontkönyvtáraiban | 38 MB-os SVG (P10 alaprajz): betöltés **~0,37 s**, renderelés 1000 px-re **~0,23 s** | WebKit (Safari) ~1,3 s + ~0,15 s, CoreSVG (NSImage) ~2,0 s + ~0,9 s |
+| **nitrocdr** | CorelDRAW 5 – X6 (CDR), CMX | saját [libcdr-forkunk](https://github.com/gereoffy/libcdr) sok javítással (szövegstílusok, sorköz, vágás, bitkép-átlátszóság) és kétszer gyorsabb librevenge-dzsel; közvetlenül plutovg-vel rajzol | 17,7 MB-os CDR (P10 alaprajz): betöltés **~3,0 s**, renderelés 1000 px-re **~0,33 s** | eredeti libcdr `cdr2xhtml` ~9 s (csak SVG-vé alakítás) |
 
 Az idők Intel i9-en mérve. A dekóderek ARM-on (NEON) is gyorsak: egy 2020-as M1-es MacBook
 Airen egy 24 MP-es JPEG ~30 ms alatt dekódolódik, ~3×-osan gyorsabban, mint ugyanazon a gépen az
