@@ -16,6 +16,8 @@ libcdr fixes for nitroview (scripts/get-deps.sh applies this after downloading):
   font style 0x1000 (0x80 in CorelDRAW 9) in older text records
 - the symbol definitions (LIST sytr, CorelDRAW X6+) are skipped: they came out as an extra
   first page before the drawing
+- text records of CorelDRAW 7-X5 with a style whose 0x20 field is a single zero byte lost
+  their text (the byte was not skipped)
 
 diff --git a/src/lib/CDRContentCollector.cpp b/src/lib/CDRContentCollector.cpp
 index e8e0291..64d2369 100644
@@ -190,7 +192,7 @@ index c1ccd2a..5ce0278 100644
  #define CDR_FOURCC_LIST 0x5453494c
  #define CDR_FOURCC_lnkg 0x676b6e6c
 diff --git a/src/lib/CDRParser.cpp b/src/lib/CDRParser.cpp
-index 7690725..e19cb35 100644
+index 7690725..ce1e227 100644
 --- a/src/lib/CDRParser.cpp
 +++ b/src/lib/CDRParser.cpp
 @@ -121,6 +121,7 @@ static int parseColourString(const char *colourString, libcdr::CDRColor &colour,
@@ -297,7 +299,21 @@ index 7690725..e19cb35 100644
          if (fl2&4) // Font Size
            style.m_fontSize = readCoordinate(input);
          if (fl2&8) // assumption
-@@ -2989,7 +3028,9 @@ void libcdr::CDRParser::readTxsm5(librevenge::RVNGInputStream *input)
+@@ -2642,10 +2681,12 @@ void libcdr::CDRParser::readTxsm(librevenge::RVNGInputStream *input, unsigned le
+         }
+         if (fl3&0x20) // Something
+         {
++          // a zero byte alone, else a fill id (+ 48 bytes from version 15); the zero byte
++          // was not skipped, so the text of such records was lost
+           unsigned flag = readU8(input);
+-          input->seek(-1, librevenge::RVNG_SEEK_CUR);
+           if (flag)
+           {
++            input->seek(-1, librevenge::RVNG_SEEK_CUR);
+             input->seek(4, librevenge::RVNG_SEEK_CUR); // ftil fild Id
+             if (m_version >= 1500)
+               input->seek(48, librevenge::RVNG_SEEK_CUR);
+@@ -2989,7 +3030,9 @@ void libcdr::CDRParser::readTxsm5(librevenge::RVNGInputStream *input)
        input->seek(4, librevenge::RVNG_SEEK_CUR);
        textData.push_back(readU8(input));
        input->seek(1, librevenge::RVNG_SEEK_CUR);
@@ -308,7 +324,7 @@ index 7690725..e19cb35 100644
      }
      if (!textData.empty())
        m_collector->collectText(textId, stlId, textData, charDescriptions, styles);
-@@ -3194,6 +3235,9 @@ void libcdr::CDRParser::_readX6StyleString(librevenge::RVNGInputStream *input, u
+@@ -3194,6 +3237,9 @@ void libcdr::CDRParser::_readX6StyleString(librevenge::RVNGInputStream *input, u
      boost::optional<unsigned> fontSize = pt.get_optional<unsigned>("character.latin.size");
      if (!!fontSize)
        style.m_fontSize = (double)fontSize.get() / 254000.0;
