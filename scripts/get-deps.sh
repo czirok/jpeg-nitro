@@ -5,7 +5,8 @@
 #   - nasm (needed to build libjpeg-turbo's SIMD code) and cmake (via pip), locally
 #   - stb_image.h and wuffs (only for the decoder comparison in bench/bench)
 #   - lunasvg (MIT, with its plutovg): SVG rendering in nitroview
-#   - libcdr + librevenge (MPL-2.0), lcms2 (MIT) and the boost headers: CorelDRAW
+#   - libcdr (our fork with fixes, github.com/gereoffy/libcdr) + librevenge (MPL-2.0),
+#     lcms2 (MIT) and the boost headers: CorelDRAW
 #     drawings in nitroview (sources only; the Makefile compiles them)
 # Nothing is installed system-wide.
 set -euo pipefail
@@ -15,7 +16,7 @@ TP=$PWD
 LJT_VER=3.1.2
 NASM_VER=2.16.03
 LUNASVG_COMMIT=90d6ff333862acf3f5551ffbbcb1e45957661881   # 2026-10-15
-LIBCDR_COMMIT=aaa57df5a85f4564d89555e2884b41ccd14d1c64    # 2026-10-13, github.com/LibreOffice/libcdr
+LIBCDR_COMMIT=49eb9ec1fd135dc6888e3658c763815d843255e0    # 2026-10-16, github.com/gereoffy/libcdr
 LIBREVENGE_VER=0.0.6
 LCMS2_VER=2.19.1
 BOOST_VER=1.89.0
@@ -39,17 +40,16 @@ if [ ! -f lunasvg/.stamp-$LUNASVG_STAMP ]; then
   touch lunasvg/.stamp-$LUNASVG_STAMP
 fi
 
-# CorelDRAW: libcdr + patches/libcdr.patch, librevenge + patches/librevenge.patch (re-applied when
-# a patch changes), lcms2, and the boost headers (only boost/: libcdr and librevenge use
+# CorelDRAW: libcdr from our fork (LibreOffice's libcdr with the fixes nitroview needs, one
+# commit each: github.com/gereoffy/libcdr), librevenge + patches/librevenge.patch (re-applied
+# when the patch changes), lcms2, and the boost headers (only boost/: libcdr and librevenge use
 # header-only parts)
-LIBCDR_STAMP=$LIBCDR_COMMIT-$(cksum < ../patches/libcdr.patch | cut -d' ' -f1)
-if [ ! -f libcdr/.stamp-$LIBCDR_STAMP ]; then
+if [ ! -f libcdr/.stamp-$LIBCDR_COMMIT ]; then
   rm -rf libcdr libcdr-$LIBCDR_COMMIT
-  curl -fsSL -o libcdr.tar.gz https://github.com/LibreOffice/libcdr/archive/$LIBCDR_COMMIT.tar.gz
+  curl -fsSL -o libcdr.tar.gz https://github.com/gereoffy/libcdr/archive/$LIBCDR_COMMIT.tar.gz
   tar xf libcdr.tar.gz && rm libcdr.tar.gz
-  (cd libcdr-$LIBCDR_COMMIT && patch -p1 -s < ../../patches/libcdr.patch)
   mv libcdr-$LIBCDR_COMMIT libcdr
-  touch libcdr/.stamp-$LIBCDR_STAMP
+  touch libcdr/.stamp-$LIBCDR_COMMIT
 fi
 LIBREVENGE_STAMP=$LIBREVENGE_VER-$(cksum < ../patches/librevenge.patch | cut -d' ' -f1)
 if [ ! -f librevenge/.stamp-$LIBREVENGE_STAMP ]; then

@@ -114,21 +114,23 @@ méretű rétegeket foglaltak (összeomlás). Amit nem: szűrők (az árnyék é
 sprite-fájlok, amelyek nem rajzolnak semmit. Egy Macről összegyűjtött 883 SVG-ből (ikonok, logók,
 ábrák, Illustrator-exportok) 867 nyílik meg; a többi 16 böngészőben sem rajzol semmit.
 
-**CorelDRAW** (CDR és CMX, macOS-en, ha a `scripts/get-deps.sh` letöltötte a
-[libcdr](https://github.com/LibreOffice/libcdr)-t): a libcdr (a LibreOffice-é, az Inkscape és a
-LibreOffice Draw is ezt használja) olvassa be a rajzot; a nitrocdr (`src/nitrocdr.cpp`) rajzlistába
-gyűjti, amit átad, és közvetlenül a plutovg-vel rajzolja ki, SVG nélkül, így a beágyazott
-szkennelések és fotók bitképként maradnak a memóriában. A megjelenített terület a rajz befoglaló kerete (kis margóval), nem
-a fájlban beállított lapméret, így egy kis logó is kitölti az ablakot. A lapozás, a nagyítás és az éles részlet úgy
-megy, mint az SVG-nél (többoldalas dokumentum oldalai között a [ és ] vált). A
-`patches/libcdr.patch` ehhez javítja a libcdr-t: a nyitott vonalak nincsenek kitöltve, a szöveg
-megtartja a forgatását és a vízszintes nyújtását, és a valódi kezdőpontjára kerül, a `CMYK100` színek (CorelDRAW 2022) nem
-fehérek, a rejtett rétegek elemei kimaradnak (egy importált PDF a kikapcsolt rétegeit rejtett
-rétegként tartja meg), és az ICU helyett iconv dolgozik (kódlapok; karakterkészlet nélkül
-windows-1250, ha a szövegben ő/ű van); a `patches/librevenge.patch` a beágyazott képeket base64
-nélkül engedi át. A vonalak legalább egy képpont szélesek, mint a CorelDRAW-ban. Amit nem tud:
-nyílhegyek, a Corel saját vektoros mintakitöltései, néhány nagyon régi CDR szövege (a libcdr
-UTF-16-ként olvassa). Egy Macről összegyűjtött 193 CDR (ArchiCAD-PDF-ből készült alaprajzok,
+**CorelDRAW** (CDR és CMX, macOS-en, ha a `scripts/get-deps.sh` letöltötte a libcdr-t): a libcdr
+(a LibreOffice-é, az Inkscape és a LibreOffice Draw is ezt használja) olvassa be a rajzot; a nitrocdr
+(`src/nitrocdr.cpp`) rajzlistába gyűjti, amit átad, és közvetlenül a plutovg-vel rajzolja ki, SVG
+nélkül, így a beágyazott szkennelések és fotók bitképként maradnak a memóriában. A megjelenített
+terület a rajz befoglaló kerete (kis margóval), nem a fájlban beállított lapméret, így egy kis logó
+is kitölti az ablakot. A lapozás, a nagyítás és az éles részlet úgy megy, mint az SVG-nél
+(többoldalas dokumentum oldalai között a [ és ] vált). A libcdr a saját forkunkból jön
+([gereoffy/libcdr](https://github.com/gereoffy/libcdr)), benne a szükséges javítások, mindegyik
+külön commit: a nyitott vonalak nincsenek kitöltve; a szöveg megtartja a forgatását, a vízszintes
+nyújtását és a félkövérségét, és a valódi kezdőpontjára kerül; a `CMYK100` színek (CorelDRAW 2022)
+nem fehérek; a rejtett rétegek elemei kimaradnak (egy importált PDF a kikapcsolt rétegeit rejtett
+rétegként tartja meg); a szimbólumdefiníciók nem adnak egy plusz oldalt; a bitképek megtartják az
+átlátszó hátterüket; a CorelDRAW 5 és 7–X5 fájlok elveszett szövegei megjelennek; és az ICU helyett
+iconv dolgozik (kódlapok; karakterkészlet nélkül windows-1250, ha a szövegben ő/ű van). A
+`patches/librevenge.patch` a beágyazott képeket base64 nélkül engedi át. A vonalak legalább egy
+képpont szélesek, mint a CorelDRAW-ban. Amit nem tud: nyílhegyek, a Corel saját vektoros és
+bitképes mintakitöltései. Egy Macről összegyűjtött 193 CDR (ArchiCAD-PDF-ből készült alaprajzok,
 hálózati térképek, logók) mind megnyílik; a medián 80 ms, a nagy tervrajzok 1–8 s (a libcdr
 feldolgozása, maga a rajzolás 100 ms alatt).
 
@@ -674,6 +676,6 @@ MIT, lásd [LICENSE](LICENSE). A `scripts/get-deps.sh` által letöltött opcion
 saját licencük van: libjpeg-turbo (BSD-szerű / IJG / zlib), Wuffs (Apache-2.0), stb_image
 (public domain / MIT), lunasvg és plutovg (MIT; a plutovg raszterizálója a FreeType
 „smooth” raszterizálója, FreeType License: portions of this software are copyright © 2014 The
-FreeType Project (www.freetype.org), all rights reserved), libcdr és librevenge (MPL-2.0; a javított
-forrás a third_party/ és a patches/ mappában), lcms2 (MIT), boost (Boost Software License). Az IDCT a Independent JPEG Group libjpeg-jének jidctint.c
+FreeType Project (www.freetype.org), all rights reserved), libcdr és librevenge (MPL-2.0; a libcdr-
+módosításaink a github.com/gereoffy/libcdr-ben, a librevenge-é a patches/ mappában), lcms2 (MIT), boost (Boost Software License). Az IDCT a Independent JPEG Group libjpeg-jének jidctint.c
 algoritmusát valósítja meg: ez a szoftver részben az Independent JPEG Group munkáján alapul.
