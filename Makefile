@@ -6,6 +6,7 @@
 #   make WUFFS=0         no Wuffs: PNG is decoded by Apple ImageIO (~1.8x slower)
 #   make SVG=0           no SVG support (lunasvg, from scripts/get-deps.sh)
 #   make CDR=0           no CorelDRAW support (libcdr, from scripts/get-deps.sh; needs SVG)
+#   make MIMALLOC=0      SVG / CorelDRAW code with the system malloc, not mimalloc
 #   make app             nitroview.app bundle, so the Finder can open images with it: universal
 #                        (x86_64 + arm64, macOS 12+); MAC_ARCHS=x86_64 for one architecture only
 #   make zip / make dmg  nitroview.zip / nitroview.dmg (drag to Applications) of the app
@@ -95,6 +96,8 @@ LIBREVENGE := third_party/librevenge
 LCMS       := third_party/lcms2
 BOOST      := third_party/boost
 CDR        ?= $(if $(and $(filter 1,$(SVG)),$(wildcard $(LIBCDR)/inc/libcdr/libcdr.h),$(wildcard $(LIBREVENGE)/inc/librevenge/librevenge.h),$(wildcard $(LCMS)/include/lcms2.h),$(wildcard $(BOOST)/boost/optional.hpp)),1,0)
+MI         := third_party/mimalloc
+MIMALLOC   ?= $(if $(and $(filter 1,$(SVG)),$(wildcard $(MI)/include/mimalloc-new-delete.h)),1,0)
 CXX        := clang++
 JOBS       := $(shell sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 8)
 
@@ -115,6 +118,9 @@ ifeq ($(SVG),1)
 VIEWER_DEFS += -DNV_SVG
 VIEWER_OBJS += build/libnitrosvg.a
 VIEWER_LIBS += -lc++
+endif
+ifeq ($(MIMALLOC),1)   # C++ new / delete (the SVG / CorelDRAW code) through mimalloc
+VIEWER_OBJS += build/mimalloc.o build/nitroalloc.o
 endif
 
 REF_CFLAGS := $(CFLAGS) -DNJ_REFERENCE -I$(LJT)/include
@@ -260,8 +266,17 @@ endef
 build/libnitrocdr.a: src/nitrocdr.cpp src/nitrocdr.h $(CDR_STAMP)
 	$(call cdr_lib,$(CPUFLAGS))
 
+# mimalloc and the new / delete that use it; $(1): compiler flags (architecture, CPU)
+define mimalloc_objs
+	@mkdir -p $(@D)
+	$(CC) $(1) -O3 -DNDEBUG -w -I$(MI)/include -c $(MI)/src/static.c -o $(@D)/mimalloc.o
+	$(CXX) -std=c++17 $(1) -O2 -I$(MI)/include -c src/nitroalloc.cpp -o $(@D)/nitroalloc.o
+endef
+build/mimalloc.o build/nitroalloc.o: src/nitroalloc.cpp $(wildcard $(MI)/.version-*)
+	$(call mimalloc_objs,$(CPUFLAGS))
+
 # rebuild the viewer when the optional parts change
-CONFIG := tj$(TURBOJPEG)-wuffs$(WUFFS)-svg$(SVG)-cdr$(CDR)
+CONFIG := tj$(TURBOJPEG)-wuffs$(WUFFS)-svg$(SVG)-cdr$(CDR)-mi$(MIMALLOC)
 build/.config-$(CONFIG):
 	@mkdir -p build
 	@rm -f build/.config-* nitroview
@@ -303,14 +318,17 @@ build/app-%/libnitrosvg.a: src/nitrosvg.cpp src/nitrosvg.h $(SVG_STAMP)
 	$(call svg_lib,-arch $* $(MAC_MIN) $(APPCPU_$*))
 build/app-%/libnitrocdr.a: src/nitrocdr.cpp src/nitrocdr.h $(CDR_STAMP)
 	$(call cdr_lib,-arch $* $(MAC_MIN) $(APPCPU_$*))
+build/app-%/mimalloc.o: src/nitroalloc.cpp $(wildcard $(MI)/.version-*)
+	$(call mimalloc_objs,-arch $* $(MAC_MIN) $(APPCPU_$*))
 build/app-%/nitroview: src/nitroview.m build/shaders.inc $(DEC_SRC) $(DEC_HDR) $(if $(filter 1,$(WUFFS)),build/app-%/png_wuffs.o) \
                        $(if $(filter 1,$(SVG)),build/app-%/libnitrosvg.a) $(if $(filter 1,$(CDR)),build/app-%/libnitrocdr.a) \
+                       $(if $(filter 1,$(MIMALLOC)),build/app-%/mimalloc.o) \
                        build/.config-$(CONFIG) Makefile
 	@mkdir -p $(@D)
 	$(CC) -arch $* $(MAC_MIN) -O3 $(APPCPU_$*) -Wall -Wextra -Wno-unused-parameter -Ibuild \
 	  $(if $(call ljt_has,$*),-DNV_TURBOJPEG -I$(LJT)/include) $(if $(filter 1,$(WUFFS)),-DNV_WUFFS) $(if $(filter 1,$(SVG)),-DNV_SVG) $(if $(filter 1,$(CDR)),-DNV_CDR) \
 	  -fobjc-arc src/nitroview.m $(DEC_SRC) $(if $(filter 1,$(WUFFS)),$(@D)/png_wuffs.o) $(if $(filter 1,$(CDR)),$(@D)/libnitrocdr.a -liconv -lz) $(if $(filter 1,$(SVG)),$(@D)/libnitrosvg.a -lc++) \
-	  $(if $(call ljt_has,$*),$(LJT)/lib/libturbojpeg.a -Wl$(COMMA)-w) $(FRAMEWORKS) -framework ImageIO -o $@
+	  $(if $(filter 1,$(MIMALLOC)),$(@D)/mimalloc.o $(@D)/nitroalloc.o) $(if $(call ljt_has,$*),$(LJT)/lib/libturbojpeg.a -Wl$(COMMA)-w) $(FRAMEWORKS) -framework ImageIO -o $@
 build/nitroview-universal: $(foreach a,$(MAC_ARCHS),build/app-$(a)/nitroview)
 	lipo -create $^ -output $@
 

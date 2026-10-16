@@ -20,6 +20,7 @@ LIBCDR_COMMIT=551bab4aef5b2541c88180b01070f9c4ec9f3539    # 2026-10-16, github.c
 LIBREVENGE_VER=0.0.6
 LCMS2_VER=2.19.1
 ZLIB_VER=1.3.1      # (only for the Windows build: macOS and Linux have it)
+MIMALLOC_VER=2.1.7
 BOOST_VER=1.89.0
 JOBS=$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 8)
 
@@ -74,6 +75,14 @@ if [ ! -f zlib/.version-$ZLIB_VER ]; then
   tar xf zlib.tar.gz && rm zlib.tar.gz
   mv zlib-$ZLIB_VER zlib
   touch zlib/.version-$ZLIB_VER
+fi
+# mimalloc: the allocator of the SVG / CorelDRAW code (C++ new / delete)
+if [ ! -f mimalloc/.version-$MIMALLOC_VER ]; then
+  rm -rf mimalloc mimalloc-$MIMALLOC_VER
+  curl -fsSL -o mimalloc.tar.gz https://github.com/microsoft/mimalloc/archive/refs/tags/v$MIMALLOC_VER.tar.gz
+  tar xf mimalloc.tar.gz && rm mimalloc.tar.gz
+  mv mimalloc-$MIMALLOC_VER mimalloc
+  touch mimalloc/.version-$MIMALLOC_VER
 fi
 if [ ! -f boost/.version-$BOOST_VER ]; then
   B=boost_${BOOST_VER//./_}

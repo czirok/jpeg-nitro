@@ -186,7 +186,10 @@ family); a missing font is replaced by a similar one, so its text may run a litt
 shorter. Lines are never thinner than one device pixel, as in CorelDRAW. Not supported: arrowheads, Corel's own vector and
 bitmap pattern fills. On 193
 CDRs collected from a Mac (architectural plans from ArchiCAD PDFs, network maps, logos) every file
-opens; the median takes 80 ms, big plans 1–8 s (libcdr's parsing, the drawing itself < 100 ms).
+opens; the median takes 80 ms, big plans 1–8 s (libcdr's parsing, the drawing itself < 100 ms). On macOS the C++ code
+(libcdr, librevenge, lunasvg) allocates through [mimalloc](https://github.com/microsoft/mimalloc):
+loading a big plan makes millions of small allocations, and with it plans load 20–25% faster on
+Intel and Apple Silicon too (`make MIMALLOC=0`: the system malloc).
 
 **Colour management:** embedded ICC profiles are honoured for every format (e.g. Display P3
 from iPhones and Mac screenshots, Adobe RGB scans); images without a profile are treated as
@@ -681,6 +684,6 @@ have their own licenses: libjpeg-turbo (BSD-style / IJG / zlib), Wuffs (Apache-2
 stb_image (public domain / MIT), lunasvg and plutovg (MIT; plutovg's rasterizer is FreeType's
 smooth rasterizer, FreeType License: portions of this software are copyright © 2014 The FreeType
 Project (www.freetype.org), all rights reserved), libcdr and librevenge (MPL-2.0; our libcdr
-changes are in github.com/gereoffy/libcdr, the librevenge one in patches/), lcms2 (MIT), boost (Boost Software License). The inverse DCT implements the algorithm of jidctint.c from the
+changes are in github.com/gereoffy/libcdr, the librevenge one in patches/), lcms2 (MIT), boost (Boost Software License), mimalloc (MIT). The inverse DCT implements the algorithm of jidctint.c from the
 Independent JPEG Group's libjpeg: this software is based in part on the work of the
 Independent JPEG Group.

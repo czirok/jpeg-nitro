@@ -140,7 +140,10 @@ BT”, a családra képződnek le); hiányzó font helyett hasonlót használ, i
 hosszabb vagy rövidebb lehet. A vonalak legalább egy képpont szélesek, mint a CorelDRAW-ban. Amit nem tud: nyílhegyek, a Corel saját vektoros és
 bitképes mintakitöltései. Egy Macről összegyűjtött 193 CDR (ArchiCAD-PDF-ből készült alaprajzok,
 hálózati térképek, logók) mind megnyílik; a medián 80 ms, a nagy tervrajzok 1–8 s (a libcdr
-feldolgozása, maga a rajzolás 100 ms alatt).
+feldolgozása, maga a rajzolás 100 ms alatt). macOS-en a C++ kód (libcdr,
+librevenge, lunasvg) a [mimalloc](https://github.com/microsoft/mimalloc)-kal foglal memóriát: egy nagy
+terv betöltése több millió apró foglalással jár, és így Intelen és Apple Siliconon is 20–25%-kal
+gyorsabban töltődnek be a tervek (`make MIMALLOC=0`: a rendszer malloc-ja).
 
 **Színkezelés:** a beágyazott ICC-profilokat minden formátumnál figyelembe veszi (pl. Display P3 az
 iPhone-okról és a Mac-es képernyőképekből, Adobe RGB a szkennelésekből); a profil nélküli képeket
@@ -686,5 +689,5 @@ saját licencük van: libjpeg-turbo (BSD-szerű / IJG / zlib), Wuffs (Apache-2.0
 (public domain / MIT), lunasvg és plutovg (MIT; a plutovg raszterizálója a FreeType
 „smooth” raszterizálója, FreeType License: portions of this software are copyright © 2014 The
 FreeType Project (www.freetype.org), all rights reserved), libcdr és librevenge (MPL-2.0; a libcdr-
-módosításaink a github.com/gereoffy/libcdr-ben, a librevenge-é a patches/ mappában), lcms2 (MIT), boost (Boost Software License). Az IDCT a Independent JPEG Group libjpeg-jének jidctint.c
+módosításaink a github.com/gereoffy/libcdr-ben, a librevenge-é a patches/ mappában), lcms2 (MIT), boost (Boost Software License), mimalloc (MIT). Az IDCT a Independent JPEG Group libjpeg-jének jidctint.c
 algoritmusát valósítja meg: ez a szoftver részben az Independent JPEG Group munkáján alapul.
