@@ -18,6 +18,7 @@
 #include <cmath>
 #include <cstring>
 #include <memory>
+#include <map>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -308,7 +309,7 @@ public:
     }
     void drawGraphicObject(const RVNGPropertyList &p) override {
         if (!m_inPage || m_inMaster) return;
-        std::shared_ptr<Image> img = image(p["office:binary-data"]);
+        std::shared_ptr<Image> img = cachedImage(p["office:binary-data"]);
         if (!img) return;
         Item it;
         it.kind = Item::IMAGE;
@@ -425,6 +426,24 @@ public:
 
 private:
     std::shared_ptr<Style> m_style = std::make_shared<Style>();
+    // decoded images by their data: libcdr passes the same buffer for each use of a bitmap (a
+    // label sheet repeats one 2000 x 2000 logo 72 times: decoded once, not 72 x 16 MB); the
+    // kept RVNGBinaryData keeps the buffer, so its address is not reused by another image
+    struct CachedImage {
+        librevenge::RVNGBinaryData data;
+        std::shared_ptr<Image> img;
+    };
+    std::map<std::pair<const unsigned char *, unsigned long>, CachedImage> m_images;
+    std::shared_ptr<Image> cachedImage(const RVNGProperty *p) {
+        const librevenge::RVNGBinaryData *d = p ? p->getBinaryData() : nullptr;
+        if (!d || !d->size()) return nullptr;
+        auto key = std::make_pair(d->getDataBuffer(), d->size());
+        auto f = m_images.find(key);
+        if (f != m_images.end()) return f->second.img;
+        std::shared_ptr<Image> img = image(p);
+        m_images[key] = CachedImage{*d, img};
+        return img;
+    }
     std::unique_ptr<Text> m_text;
     Span m_span;
     int m_align = 0;
@@ -589,7 +608,7 @@ private:
                 if (st->r <= 0) st->r = .01f;
             }
         } else if (is(p, "draw:fill", "bitmap")) {
-            st->tile = image(p["draw:fill-image"]);
+            st->tile = cachedImage(p["draw:fill-image"]);
             if (st->tile) {
                 st->fill = FILL_BITMAP;
                 st->tileRel = p["svg:width"] && p["svg:width"]->getUnit() == librevenge::RVNG_PERCENT;
