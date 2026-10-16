@@ -163,7 +163,8 @@ either.
 [libcdr](https://github.com/LibreOffice/libcdr)): libcdr (from LibreOffice, used by Inkscape and
 LibreOffice Draw too) reads the drawing; nitrocdr (`src/nitrocdr.cpp`) records what it reports as a
 display list and draws it with plutovg directly, without an SVG step, so embedded scans and photos
-stay decoded bitmaps in memory. Paging, zooming and the sharp detail work as for SVG (only the first
+stay decoded bitmaps in memory. The shown area is the drawing's bounding box (with a small margin), not
+the page size set in the file, so a small logo fills the window. Paging, zooming and the sharp detail work as for SVG (only the first
 page of a multi-page document for now). `patches/libcdr.patch` fixes libcdr for this: open paths are
 not filled, text keeps its rotation and is placed at its real origin, `CMYK100` colours (CorelDRAW
 2022) are not white, objects on hidden layers are skipped (an imported PDF keeps its switched-off

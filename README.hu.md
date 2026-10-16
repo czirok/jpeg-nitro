@@ -116,7 +116,8 @@ sprite-fájlok, amelyek nem rajzolnak semmit. Egy Macről összegyűjtött 883 S
 [libcdr](https://github.com/LibreOffice/libcdr)-t): a libcdr (a LibreOffice-é, az Inkscape és a
 LibreOffice Draw is ezt használja) olvassa be a rajzot; a nitrocdr (`src/nitrocdr.cpp`) rajzlistába
 gyűjti, amit átad, és közvetlenül a plutovg-vel rajzolja ki, SVG nélkül, így a beágyazott
-szkennelések és fotók bitképként maradnak a memóriában. A lapozás, a nagyítás és az éles részlet úgy
+szkennelések és fotók bitképként maradnak a memóriában. A megjelenített terület a rajz befoglaló kerete (kis margóval), nem
+a fájlban beállított lapméret, így egy kis logó is kitölti az ablakot. A lapozás, a nagyítás és az éles részlet úgy
 megy, mint az SVG-nél (többoldalas dokumentumból egyelőre csak az első oldal). A
 `patches/libcdr.patch` ehhez javítja a libcdr-t: a nyitott vonalak nincsenek kitöltve, a szöveg
 megtartja a forgatását és a valódi kezdőpontjára kerül, a `CMYK100` színek (CorelDRAW 2022) nem
