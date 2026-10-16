@@ -14,6 +14,8 @@ libcdr fixes for nitroview (scripts/get-deps.sh applies this after downloading):
   its spans, the font size times the vertical scale, not rounded to half points)
 - bold text is marked (fo:font-weight): "weight" 4096 in the style strings of CorelDRAW X6+,
   font style 0x1000 (0x80 in CorelDRAW 9) in older text records
+- the symbol definitions (LIST sytr, CorelDRAW X6+) are skipped: they came out as an extra
+  first page before the drawing
 
 diff --git a/src/lib/CDRContentCollector.cpp b/src/lib/CDRContentCollector.cpp
 index e8e0291..64d2369 100644
@@ -175,8 +177,20 @@ index 2eae18c..6e388c4 100644
  
    void _fillProperties(librevenge::RVNGPropertyList &propList);
    void _lineProperties(librevenge::RVNGPropertyList &propList);
+diff --git a/src/lib/CDRDocumentStructure.h b/src/lib/CDRDocumentStructure.h
+index c1ccd2a..5ce0278 100644
+--- a/src/lib/CDRDocumentStructure.h
++++ b/src/lib/CDRDocumentStructure.h
+@@ -76,6 +76,7 @@
+ #define CDR_FOURCC_INFO 0x4f464e49
+ 
+ #define CDR_FOURCC_layr 0x7279616c
++#define CDR_FOURCC_sytr 0x72747973
+ #define CDR_FOURCC_lgob 0x626f676c
+ #define CDR_FOURCC_LIST 0x5453494c
+ #define CDR_FOURCC_lnkg 0x676b6e6c
 diff --git a/src/lib/CDRParser.cpp b/src/lib/CDRParser.cpp
-index 7690725..7b80053 100644
+index 7690725..e19cb35 100644
 --- a/src/lib/CDRParser.cpp
 +++ b/src/lib/CDRParser.cpp
 @@ -121,6 +121,7 @@ static int parseColourString(const char *colourString, libcdr::CDRColor &colour,
@@ -197,7 +211,21 @@ index 7690725..7b80053 100644
  
  libcdr::CDRParser::~CDRParser()
  {
-@@ -633,10 +635,24 @@ bool libcdr::CDRParser::parseRecord(librevenge::RVNGInputStream *input, const st
+@@ -611,6 +613,13 @@ bool libcdr::CDRParser::parseRecord(librevenge::RVNGInputStream *input, const st
+     if (fourCC == CDR_FOURCC_RIFF || fourCC == CDR_FOURCC_LIST)
+     {
+       listType = readU32(input);
++      if (listType == CDR_FOURCC_sytr)
++      {
++        // the symbol definitions (CorelDRAW X6+): not part of any page; drawn here they
++        // came out as an extra page before the drawing
++        input->seek(position + length, librevenge::RVNG_SEEK_SET);
++        return true;
++      }
+       if (listType == CDR_FOURCC_stlt && m_version >= 700)
+         fourCC = listType;
+       else
+@@ -633,10 +642,24 @@ bool libcdr::CDRParser::parseRecord(librevenge::RVNGInputStream *input, const st
          if (readU16(input) != 4)
            return false;
        }
@@ -222,7 +250,7 @@ index 7690725..7b80053 100644
        else if (listType == CDR_FOURCC_grp || listType == CDR_FOURCC_lnkg)
          m_collector->collectGroup(level);
        else if ((listType & 0xffffff) == CDR_FOURCC_CDR || (listType & 0xffffff) == CDR_FOURCC_cdr)
-@@ -1140,10 +1156,11 @@ void libcdr::CDRParser::readBitmap(librevenge::RVNGInputStream *input)
+@@ -1140,10 +1163,11 @@ void libcdr::CDRParser::readBitmap(librevenge::RVNGInputStream *input)
    unsigned imageId = 0;
    if (m_version < 600)
    {
@@ -238,7 +266,7 @@ index 7690725..7b80053 100644
      if (m_version < 400)
        input->seek(2, librevenge::RVNG_SEEK_CUR);
      input->seek(8, librevenge::RVNG_SEEK_CUR);
-@@ -1836,6 +1853,13 @@ void libcdr::CDRParser::readFlags(librevenge::RVNGInputStream *input, unsigned l
+@@ -1836,6 +1860,13 @@ void libcdr::CDRParser::readFlags(librevenge::RVNGInputStream *input, unsigned l
    if (!_redirectX6Chunk(&input, length))
      throw GenericException();
    unsigned flags = readU32(input);
@@ -252,7 +280,7 @@ index 7690725..7b80053 100644
    m_collector->collectFlags(flags, m_version >= 400);
  }
  
-@@ -2605,7 +2629,15 @@ void libcdr::CDRParser::readTxsm(librevenge::RVNGInputStream *input, unsigned le
+@@ -2605,7 +2636,15 @@ void libcdr::CDRParser::readTxsm(librevenge::RVNGInputStream *input, unsigned le
              style.m_charSet = charSet;
          }
          if (fl2&2) // Bold/Italic, etc.
@@ -269,7 +297,7 @@ index 7690725..7b80053 100644
          if (fl2&4) // Font Size
            style.m_fontSize = readCoordinate(input);
          if (fl2&8) // assumption
-@@ -2989,7 +3021,9 @@ void libcdr::CDRParser::readTxsm5(librevenge::RVNGInputStream *input)
+@@ -2989,7 +3028,9 @@ void libcdr::CDRParser::readTxsm5(librevenge::RVNGInputStream *input)
        input->seek(4, librevenge::RVNG_SEEK_CUR);
        textData.push_back(readU8(input));
        input->seek(1, librevenge::RVNG_SEEK_CUR);
@@ -280,7 +308,7 @@ index 7690725..7b80053 100644
      }
      if (!textData.empty())
        m_collector->collectText(textId, stlId, textData, charDescriptions, styles);
-@@ -3194,6 +3228,9 @@ void libcdr::CDRParser::_readX6StyleString(librevenge::RVNGInputStream *input, u
+@@ -3194,6 +3235,9 @@ void libcdr::CDRParser::_readX6StyleString(librevenge::RVNGInputStream *input, u
      boost::optional<unsigned> fontSize = pt.get_optional<unsigned>("character.latin.size");
      if (!!fontSize)
        style.m_fontSize = (double)fontSize.get() / 254000.0;
