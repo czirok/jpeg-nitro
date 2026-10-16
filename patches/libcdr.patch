@@ -5,8 +5,11 @@ libcdr fixes for nitroview (scripts/get-deps.sh applies this after downloading):
 - "CMYK100" colour strings (CorelDRAW 2022) were read as white
 - objects on hidden layers (layer flag 0x100, e.g. the switched-off layers of an imported
   PDF) are skipped, as in CorelDRAW and its PDF export
-- no ICU: code pages through iconv, UTF-16 and UTF-8 decoded here; without a charset,
-  windows-1250 when the text has o/u with double acute, else windows-1252
+- no ICU: code pages through iconv, UTF-16 and UTF-8 decoded here; without a charset (and for
+  ANSI / DEFAULT / East Asian ones, which old Hungarian files use too) windows-1250 when the
+  text has o/u with double acute, else windows-1252
+- CorelDRAW 5 texts (one byte per character) were read as UTF-16
+- CorelDRAW 5 bitmaps came out turned by 180 degrees
 
 diff --git a/src/lib/CDRContentCollector.cpp b/src/lib/CDRContentCollector.cpp
 index e8e0291..585d02b 100644
@@ -129,7 +132,7 @@ index 2eae18c..74f5544 100644
    void _fillProperties(librevenge::RVNGPropertyList &propList);
    void _lineProperties(librevenge::RVNGPropertyList &propList);
 diff --git a/src/lib/CDRParser.cpp b/src/lib/CDRParser.cpp
-index 7690725..a0dcd4d 100644
+index 7690725..73844d0 100644
 --- a/src/lib/CDRParser.cpp
 +++ b/src/lib/CDRParser.cpp
 @@ -121,6 +121,7 @@ static int parseColourString(const char *colourString, libcdr::CDRColor &colour,
@@ -175,7 +178,23 @@ index 7690725..a0dcd4d 100644
        else if (listType == CDR_FOURCC_grp || listType == CDR_FOURCC_lnkg)
          m_collector->collectGroup(level);
        else if ((listType & 0xffffff) == CDR_FOURCC_CDR || (listType & 0xffffff) == CDR_FOURCC_cdr)
-@@ -1836,6 +1852,13 @@ void libcdr::CDRParser::readFlags(librevenge::RVNGInputStream *input, unsigned l
+@@ -1140,10 +1156,11 @@ void libcdr::CDRParser::readBitmap(librevenge::RVNGInputStream *input)
+   unsigned imageId = 0;
+   if (m_version < 600)
+   {
+-    x1 = readCoordinate(input);
+-    y1 = readCoordinate(input);
+-    x2 = 0.0;
+-    y2 = 0.0;
++    // the bitmap spans (0, 0) .. (x, y): as x2, y2 (x1 > x2 made it a 180 degree rotation)
++    x1 = 0.0;
++    y1 = 0.0;
++    x2 = readCoordinate(input);
++    y2 = readCoordinate(input);
+     if (m_version < 400)
+       input->seek(2, librevenge::RVNG_SEEK_CUR);
+     input->seek(8, librevenge::RVNG_SEEK_CUR);
+@@ -1836,6 +1853,13 @@ void libcdr::CDRParser::readFlags(librevenge::RVNGInputStream *input, unsigned l
    if (!_redirectX6Chunk(&input, length))
      throw GenericException();
    unsigned flags = readU32(input);
@@ -189,6 +208,17 @@ index 7690725..a0dcd4d 100644
    m_collector->collectFlags(flags, m_version >= 400);
  }
  
+@@ -2989,7 +3013,9 @@ void libcdr::CDRParser::readTxsm5(librevenge::RVNGInputStream *input)
+       input->seek(4, librevenge::RVNG_SEEK_CUR);
+       textData.push_back(readU8(input));
+       input->seek(1, librevenge::RVNG_SEEK_CUR);
+-      charDescriptions.push_back((unsigned char)((readU16(input) >> 3) & 0xff));
++      // one byte per character here: bit 0 (two-byte UTF-16 in later versions) must not be set,
++      // else pairs of characters were read as one (CorelDRAW 5 texts came out as CJK)
++      charDescriptions.push_back((unsigned char)((readU16(input) >> 3) & 0xfe));
+     }
+     if (!textData.empty())
+       m_collector->collectText(textId, stlId, textData, charDescriptions, styles);
 diff --git a/src/lib/CDRParser.h b/src/lib/CDRParser.h
 index b14f100..441d100 100644
 --- a/src/lib/CDRParser.h
@@ -204,7 +234,7 @@ index b14f100..441d100 100644
  };
  
 diff --git a/src/lib/libcdr_utils.cpp b/src/lib/libcdr_utils.cpp
-index e88bda9..1e056a2 100644
+index e88bda9..e999955 100644
 --- a/src/lib/libcdr_utils.cpp
 +++ b/src/lib/libcdr_utils.cpp
 @@ -14,10 +14,8 @@
@@ -225,9 +255,9 @@ index e88bda9..1e056a2 100644
  {
  
 -static unsigned short getEncodingFromICUName(const char *name)
-+// No charset given: CorelDRAW then wrote the system's ANSI code page. Without ICU's charset
-+// detector: Central European (windows-1250) when the text has its o/u with double acute
-+// (0xd5 0xdb 0xf5 0xfb: Hungarian; the same bytes are rare in windows-1252), else ANSI.
++// No charset given (or ANSI / DEFAULT, which old Hungarian files also use for Central European
++// text): without ICU's charset detector, windows-1250 when the text has its o/u with double
++// acute (0xd5 0xdb 0xf5 0xfb: Hungarian; the same bytes are rare in windows-1252), else 1252.
 +static unsigned short getEncoding(const unsigned char *buffer, unsigned long bufferLength)
  {
 -  // ANSI
@@ -434,7 +464,18 @@ index e88bda9..1e056a2 100644
    {
      0x0020, 0x0021, 0x2200, 0x0023, 0x2203, 0x0025, 0x0026, 0x220D, // 0x20 ..
      0x0028, 0x0029, 0x2217, 0x002B, 0x002C, 0x2212, 0x002E, 0x002F,
-@@ -376,66 +326,53 @@ void libcdr::appendCharacters(librevenge::RVNGString &text, std::vector<unsigned
+@@ -358,6 +308,10 @@ void libcdr::appendCharacters(librevenge::RVNGString &text, std::vector<unsigned
+     0x23A0, 0x23A4, 0x23A5, 0x23A6, 0x23AB, 0x23AC, 0x23AD, 0x0020  // .. 0xFE
+   };
+ 
++  // East Asian charsets: old files (CorelDRAW 5) mark Hungarian text with them too, and
++  // nitroview is not meant for CJK text: guess as when no charset is given
++  if (charset == 0x80 || charset == 0x81 || charset == 0x86 || charset == 0x88)
++    charset = 0;
+   if (!charset && !characters.empty())
+     charset = getEncoding(&characters[0], characters.size());
+ 
+@@ -376,66 +330,53 @@ void libcdr::appendCharacters(librevenge::RVNGString &text, std::vector<unsigned
    }
    else
    {
@@ -495,9 +536,10 @@ index e88bda9..1e056a2 100644
 -      conv = ucnv_open("windows-1250", &status);
 +      codepage = "CP1250";
        break;
-     default:
+-    default:
 -      conv = ucnv_open("windows-1252", &status);
-+      codepage = "CP1252";
++    default:   // ANSI, DEFAULT and others: often Central European text (old Hungarian files)
++      codepage = getEncoding(&characters[0], characters.size()) == 0xee ? "CP1250" : "CP1252";
        break;
      }
 -    if (U_SUCCESS(status) && conv)
@@ -517,7 +559,7 @@ index e88bda9..1e056a2 100644
    }
  }
  
-@@ -444,22 +381,22 @@ void libcdr::appendCharacters(librevenge::RVNGString &text, std::vector<unsigned
+@@ -444,22 +385,22 @@ void libcdr::appendCharacters(librevenge::RVNGString &text, std::vector<unsigned
    if (characters.empty())
      return;
  
