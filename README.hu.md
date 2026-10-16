@@ -32,8 +32,10 @@ timelapse) teljes felbontásban, valós időben „lejátszhatók”, akár 60 k
 CR2** raw fájlokból a gép által beléjük tett teljes méretű JPEG jelenik meg (a nitrojpeggel, néhány
 ms alatt az ImageIO 150–400 ms-a helyett; az elforgatásukat is figyelembe veszi). macOS-en a **HEIC**
 fotókat (iPhone) a nitroheic (`src/nitroheic.c`) dekódolja: egy iPhone-fotó 48 független HEVC-csempéből
-álló rács, ezeket párhuzamosan, magonként egy VideoToolbox-dekóderrel bontja ki Y/Cb/Cr síkokba, a
-színkonverzió a GPU-n megy — egy 12 MP-es kép ~33 ms alatt az ImageIO ~200 ms-a helyett (Intel i9).
+álló rács, ezeket párhuzamosan bontja ki Y/Cb/Cr síkokba (Intelen magonként egy szoftveres
+VideoToolbox-dekóderrel, Apple Siliconon 4 szálon a médiamotorral), a színkonverzió a GPU-n megy — egy
+12 MP-es kép ~33 ms alatt az ImageIO ~200 ms-a helyett egy Intel i9-en, ~26 ms alatt ~59 ms helyett
+egy M1-en.
 A TIFF, WebP, GIF, BMP és a többi HEIC macOS-en az Apple ImageIO-val, Windowson a WIC-kel, Linuxon a GTK betöltőivel nyílik
 meg (lásd lent: „Windows” és „GNOME / Linux”). macOS-en és Windowson vektoros rajzokat is mutat: **SVG**-t
 (lunasvg) és **CorelDRAW** CDR / CMX fájlokat (libcdr, a saját, sok javítást tartalmazó forkunk),

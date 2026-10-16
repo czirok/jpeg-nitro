@@ -432,19 +432,27 @@ int nh_decode_planes(const uint8_t *data, size_t len, const nh_info *info, uint8
     CFRelease(hvcc);
     if (st || !fmt) return -1;
 
-    // the software decoder: in parallel it is several times faster than a hardware one, which
-    // serves one tile at a time
+    // Intel: the software decoder; in parallel it is several times faster than a hardware one
+    // (a Radeon's serves one tile at a time). Apple Silicon: its media engine, with 4 sessions
+    // (M1, 12 MP: ~26 ms; software ~65 ms, ImageIO ~59 ms)
     int32_t pf = kCVPixelFormatType_420YpCbCr8BiPlanarFullRange;
     CFNumberRef pfn = CFNumberCreate(NULL, kCFNumberSInt32Type, &pf);
     const void *pk[] = {kCVPixelBufferPixelFormatTypeKey}, *pv[] = {pfn};
     CFDictionaryRef attrs = CFDictionaryCreate(NULL, pk, pv, 1, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
     CFRelease(pfn);
-    const void *sk[] = {kVTVideoDecoderSpecification_EnableHardwareAcceleratedVideoDecoder}, *sv[] = {kCFBooleanFalse};
+#if defined(__arm64__) || defined(__aarch64__)
+    const CFBooleanRef hardware = kCFBooleanTrue;
+    const int max_workers = 4;
+#else
+    const CFBooleanRef hardware = kCFBooleanFalse;
+    const int max_workers = 8;
+#endif
+    const void *sk[] = {kVTVideoDecoderSpecification_EnableHardwareAcceleratedVideoDecoder}, *sv[] = {hardware};
     CFDictionaryRef spec = CFDictionaryCreate(NULL, sk, sv, 1, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
 
-    if (nthreads <= 0) {   // all CPUs, but at most 8: more decoders do not make it faster
+    if (nthreads <= 0) {   // all CPUs, but at most max_workers: more decoders do not make it faster
         long n = sysconf(_SC_NPROCESSORS_ONLN);
-        nthreads = n < 1 ? 1 : n > 8 ? 8 : (int)n;
+        nthreads = n < 1 ? 1 : n > max_workers ? max_workers : (int)n;
     }
     if (nthreads > info->ntiles) nthreads = info->ntiles;
     _Atomic int next = 0, failed = 0;

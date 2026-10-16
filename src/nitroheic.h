@@ -3,10 +3,11 @@
 // nitroheic (macOS): HEIC photos (iPhone and others) decoded tile by tile in parallel.
 //
 // An iPhone photo is a grid of 512 x 512 tiles, each an independent HEVC still picture.
-// ImageIO decodes them one after the other (~175 ms for 12 MP on an Intel Mac without a
-// fast hardware decoder); here every worker has its own VideoToolbox session and takes
-// the next tile, and the result is planar Y/Cb/Cr like nitrojpeg's (colour conversion on
-// the GPU): ~40 ms. Only the HEIF structure is parsed here; HEVC decoding is Apple's.
+// ImageIO decodes them one after the other (~200 ms for 12 MP on an Intel i9, ~59 ms on an
+// M1); here every worker has its own VideoToolbox session (Intel: software decoders, one
+// per core up to 8; Apple Silicon: 4 on the media engine) and takes the next tile, and the
+// result is planar Y/Cb/Cr like nitrojpeg's (colour conversion on the GPU): ~33 ms on the
+// i9, ~26 ms on the M1. Only the HEIF structure is parsed here; HEVC decoding is Apple's.
 //
 // Handled: an 8-bit 4:2:0 HEVC image or grid of them, with rotation (irot), mirroring
 // (imir) and an ICC profile. Not handled (returns an error: use ImageIO): alpha, 10-bit,
@@ -37,7 +38,8 @@ typedef struct {
 int nh_read_info(const uint8_t *data, size_t len, nh_info *info);
 
 // Decodes into planar Y/Cb/Cr (full range, BT.601, as JPEG). planes[c] must hold
-// plane_h[c] rows of pitch[c] bytes. nthreads: parallel decoders (<= 0: the CPUs, at most 8).
+// plane_h[c] rows of pitch[c] bytes. nthreads: parallel decoders (<= 0: the CPUs, at most 8;
+// Apple Silicon: 4).
 // Returns 0 on success.
 int nh_decode_planes(const uint8_t *data, size_t len, const nh_info *info, uint8_t *const planes[3],
                      const size_t pitch[3], int nthreads);
